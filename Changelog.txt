@@ -1,4 +1,12 @@
 ---------
+v0.2.22
+---------
+#add AnalogMultiPos
+Usefull for resistor ladders for rotary switches to reduce inputs.
+
+from Tekadept - via Discord
+
+---------
 v0.2.21
 ---------
 #add Inverted Potentiometer Class 
