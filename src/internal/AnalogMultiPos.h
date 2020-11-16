@@ -39,7 +39,6 @@ private:
             time_now = millis();
             if (state != lastState_)
             {
-                 // TODO: Generalize for more than 10, stay efficient
                 if (state == 0)
                 {
                     if (tryToSendDcsBiosMessage(msg_, "0"))

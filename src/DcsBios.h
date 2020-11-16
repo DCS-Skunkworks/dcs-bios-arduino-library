@@ -42,7 +42,7 @@ do not come with their own build system, we are just putting everything into the
 
 	namespace DcsBios {
 		ProtocolParser parser;
-		
+
 		ISR(USART0_RX_vect) {
 			volatile uint8_t c = UDR0;
 			parser.processCharISR(c);
