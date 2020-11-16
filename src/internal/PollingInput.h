@@ -11,6 +11,7 @@ namespace DcsBios {
 
 	class PollingInput {
 		private:
+			virtual void resetState() = 0;
 			virtual void pollInput() = 0;
 			PollingInput* nextPollingInput;
 		public:
@@ -44,6 +45,21 @@ namespace DcsBios {
 					// start after the input that got to queue the last message
 					firstPollingInput = lastSender->nextPollingInput;
 				}
+			}
+
+			static void resetAllStates() 
+			{
+				PollingInput* pi = firstPollingInput;
+				if (!pi) return;
+				
+				do { // step through circular linked list
+					pi->resetState();
+					
+					// make linked list circular if it is not already
+					if (pi->nextPollingInput == NULL) pi->nextPollingInput = firstPollingInput;
+					
+					pi = pi->nextPollingInput;
+				} while (pi != firstPollingInput); // util we get back to the start
 			}
 	};
 	

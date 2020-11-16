@@ -56,13 +56,15 @@ do not come with their own build system, we are just putting everything into the
 			UCSR0C = (1<<UCSZ00) | (1<<UCSZ01);
 			
 			UCSR0B = (1<<RXEN0) | (1<<TXEN0) | (1<<RXCIE0);
-			
-			
 		}
 		
 		void loop() {
 			PollingInput::pollInputs();
 			ExportStreamListener::loopAll();
+		}
+
+		void resetAllStates() {
+			PollingInput::resetAllStates();
 		}
 		
 		static void usart_tx(const char* str) {

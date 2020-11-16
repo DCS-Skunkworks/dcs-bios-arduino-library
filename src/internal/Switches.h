@@ -28,6 +28,10 @@ namespace DcsBios {
 				reverse_ = reverse;
 				debounceDelay_ = debounceDelay;
 			}
+			void resetState()
+			{
+				lastState_ = (lastState_==0)?-1:0;
+			}
 			void pollInput() {
 				char state = digitalRead(pin_);
 				if (reverse_) state = !state;
@@ -48,27 +52,11 @@ namespace DcsBios {
 			Switch2Pos(const char* msg, char pin, bool reverse, unsigned long debounceDelay) { init_(msg, pin, reverse, debounceDelay); }
 			Switch2Pos(const char* msg, char pin, bool reverse) { init_(msg, pin, reverse, 50); }
 			Switch2Pos(const char* msg, char pin) { init_(msg, pin, false, 50); }
-			
-			///////////////////////////////////////////
-			//	Inserted Code
-			//
-			
-				void pollInputCurrent() 
-				{
-					char state = digitalRead(pin_);
-					if (reverse_) state = !state;
-					if (tryToSendDcsBiosMessage(msg_, state == HIGH ? "0" : "1")) {
-							lastState_ = state;
-							delay(4);
-						}
-						
-				}	
-			
-				void SetControl( const char* msg )
-				{
-					msg_ = msg;
-				}
-			
+					
+			void SetControl( const char* msg )
+			{
+				msg_ = msg;
+			}
 		};
 	
 	class Switch3Pos : PollingInput {
@@ -82,18 +70,28 @@ namespace DcsBios {
 				if (digitalRead(pinB_) == LOW) return 2;
 				return 1;
 			}
+			void resetState()
+			{
+				lastState_ = (lastState_==0)?-1:0;
+			}
 			void pollInput() {
 				char state = readState();
 				if (state != lastState_) {
 					if (state == 0)
+					{
 						if (tryToSendDcsBiosMessage(msg_, "0"))
 							lastState_ = state;
-					if (state == 1)
+					}
+					else if (state == 1)
+					{
 						if (tryToSendDcsBiosMessage(msg_, "1"))
 							lastState_ = state;
-					if (state == 2)
+					}
+					else if (state == 2)
+					{
 						if(tryToSendDcsBiosMessage(msg_, "2"))
 							lastState_ = state;
+					}
 				}
 			}
 		public:
@@ -106,31 +104,10 @@ namespace DcsBios {
 				lastState_ = readState();
 			}
 			
-			//////////////////////////////////////////
-			//	Inserted Code
-			//
-			
-				void pollInputCurrent() 
-				{
-					char state = readState();
-					if (state == 0)
-						if (tryToSendDcsBiosMessage(msg_, "0"))
-							lastState_ = state;
-					if (state == 1)
-						if (tryToSendDcsBiosMessage(msg_, "1"))
-							lastState_ = state;
-					if (state == 2)
-						if(tryToSendDcsBiosMessage(msg_, "2"))
-							lastState_ = state;
-							
-					delay(4);
-					
-				}
-				
-				void SetControl( const char* msg )
-				{
-					msg_ = msg;
-				}
+			void SetControl( const char* msg )
+			{
+				msg_ = msg;
+			}
 	};
 
 	
@@ -148,6 +125,10 @@ namespace DcsBios {
 					else if (digitalRead(pins_[i]) == HIGH && reverse_ == true) return i;
 				}
 				return lastState_;
+			}
+			void resetState()
+			{
+				lastState_ = (lastState_==0)?-1:0;
 			}
 			void pollInput() {
 				char state = readState();
@@ -171,25 +152,10 @@ namespace DcsBios {
 				lastState_ = readState();
 			}
 			
-			//////////////////////////////////////////
-			//	Inserted Code
-			//
-			
-				void pollInputCurrent() 
-				{
-					char state = readState();
-					char buf[7];
-					utoa(state, buf, 10);
-					if (tryToSendDcsBiosMessage(msg_, buf))
-						lastState_ = state;
-				
-					delay(4);
-				}
-				
-				void SetControl( const char* msg )
-				{
-					msg_ = msg;
-				}
+			void SetControl( const char* msg )
+			{
+				msg_ = msg;
+			}
 	};
 
 	class Matrix2Pos : PollingInput {
@@ -237,14 +203,20 @@ namespace DcsBios {
 				char state = readState();
 				if (state != lastState_) {
 					if (state == 0)
+					{
 						if (tryToSendDcsBiosMessage(msg_, "0"))
 							lastState_ = state;
-					if (state == 1)
+					}
+					else if (state == 1)
+					{
 						if (tryToSendDcsBiosMessage(msg_, "1"))
 							lastState_ = state;
-					if (state == 2)
+					}
+					else if (state == 2)
+					{
 						if(tryToSendDcsBiosMessage(msg_, "2"))
 							lastState_ = state;
+					}
 				}
 			}
 		public:
@@ -278,43 +250,68 @@ namespace DcsBios {
 				if (analogRead(pin_)/divisor == 9) return 9;
 				if (analogRead(pin_)/divisor == 10) return 10;
 			}
-
+			void resetState()
+			{
+				lastState_ = (lastState_==0)?-1:0;
+			}
 			void pollInput() {
 				char state = readState();
 				if (state != lastState_) {
 					if (state == 0)
+					{
 						if (tryToSendDcsBiosMessage(msg_, "0"))
 							lastState_ = state;
-					if (state == 1)
+					}
+					else if (state == 1)
+					{
 						if (tryToSendDcsBiosMessage(msg_, "1"))
 							lastState_ = state;
-					if (state == 2)
+					}
+					else if (state == 2)
+					{
 						if(tryToSendDcsBiosMessage(msg_, "2"))
 							lastState_ = state;
-					if (state == 3)
+					}
+					else if (state == 3)
+					{
 						if(tryToSendDcsBiosMessage(msg_, "3"))
 							lastState_ = state;
-					if (state == 4)
+					}
+					else if (state == 4)
+					{
 						if(tryToSendDcsBiosMessage(msg_, "4"))
 							lastState_ = state;
-					if (state == 5)
+					}
+					else if (state == 5)
+					{
 						if(tryToSendDcsBiosMessage(msg_, "5"))
 							lastState_ = state;
-					if (state == 6)
+					}
+					else if (state == 6)
+					{
 						if(tryToSendDcsBiosMessage(msg_, "6"))
 							lastState_ = state;
-					if (state == 7)
+					}
+					else if (state == 7)
+					{
 						if(tryToSendDcsBiosMessage(msg_, "7"))
 							lastState_ = state;
-					if (state == 8)
+					}
+					else if (state == 8)
+					{
 						if(tryToSendDcsBiosMessage(msg_, "8"))
 							lastState_ = state;
-					if (state == 9)
+					}
+					else if (state == 9)
+					{
 						if(tryToSendDcsBiosMessage(msg_, "9"))
 							lastState_ = state;
-					if (state == 10)
+					}
+					else if (state == 10)
+					{
 						if(tryToSendDcsBiosMessage(msg_, "10"))
 							lastState_ = state;
+					}
 				}
 			}
 		public:
@@ -324,26 +321,12 @@ namespace DcsBios {
 				divisor = divisor_;
 				lastState_ = readState();
 			}
-	//////////////////////////////////////////
-			//	Inserted Code
-			//
 			
-				void pollInputCurrent() 
-				{
-					char state = readState();
-					char buf[7];
-					utoa(state, buf, 10);
-					if (tryToSendDcsBiosMessage(msg_, buf))
-						lastState_ = state;
-				
-					delay(4);
-				}
-				
-				void SetControl( const char* msg )
-				{
-					msg_ = msg;
-				}
-			};	
+			void SetControl( const char* msg )
+			{
+				msg_ = msg;
+			}
+		};	
 }
 
 #endif	

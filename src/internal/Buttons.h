@@ -27,13 +27,11 @@ namespace DcsBios {
 				pinMode(pin_, INPUT_PULLUP);
 				lastState_ = digitalRead(pin_);
 			}
-				///////////////////////////////////////////
-			//	Inserted Code
-			//			
-				void SetControl( const char* msg )
-				{
-					msg_ = msg;
-				}
+
+			void SetControl( const char* msg )
+			{
+				msg_ = msg;
+			}
 	};
 	
   //New Matrix-Compatible Button class

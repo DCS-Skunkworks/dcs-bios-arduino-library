@@ -18,62 +18,81 @@ private:
 
     char readState()
     {
-        int which = 0;
-        int nextval = -10;
-        int readvalue = analogRead(pin_);
-        for (int i = 0; i < (int)numOfSteps; i++)
-        {
-            if (readvalue >= nextval)
-            {
-                which = i;
-                nextval = nextval + (1024 / numOfSteps);
-            }
-        }
-        return which;
+        float fAnalogPct = analogRead(pin_) / 1024;
+
+        char result = (char)((numOfSteps-1) * fAnalogPct);
+
+        return result;
+    }
+
+    void resetState()
+    {
+        lastState_ = (lastState_==0)?-1:0;
     }
 
     void pollInput()
     {
-        char state = readState();
-
         if (millis() > time_now + period)
         {
+            char state = readState();
+
             time_now = millis();
             if (state != lastState_)
             {
+                 // TODO: Generalize for more than 10, stay efficient
                 if (state == 0)
+                {
                     if (tryToSendDcsBiosMessage(msg_, "0"))
                         lastState_ = state;
-                if (state == 1)
+                }
+                else if (state == 1)
+                {
                     if (tryToSendDcsBiosMessage(msg_, "1"))
                         lastState_ = state;
-                if (state == 2)
+                }
+                else if (state == 2)
+                {
                     if (tryToSendDcsBiosMessage(msg_, "2"))
                         lastState_ = state;
-                if (state == 3)
+                }
+                else if (state == 3)
+                {
                     if (tryToSendDcsBiosMessage(msg_, "3"))
                         lastState_ = state;
-                if (state == 4)
+                }
+                else if (state == 4)
+                {
                     if (tryToSendDcsBiosMessage(msg_, "4"))
                         lastState_ = state;
-                if (state == 5)
+                }
+                else if (state == 5) {
                     if (tryToSendDcsBiosMessage(msg_, "5"))
                         lastState_ = state;
-                if (state == 6)
+                }
+                else if (state == 6) {
                     if (tryToSendDcsBiosMessage(msg_, "6"))
                         lastState_ = state;
-                if (state == 7)
+                }
+                else if (state == 7)
+                {
                     if (tryToSendDcsBiosMessage(msg_, "7"))
                         lastState_ = state;
-                if (state == 8)
+                }
+                else if (state == 8)
+                {
                     if (tryToSendDcsBiosMessage(msg_, "8"))
                         lastState_ = state;
-                if (state == 9)
+                }
+                else if (state == 9)
+                {
                     if (tryToSendDcsBiosMessage(msg_, "9"))
                         lastState_ = state;
-                if (state == 10)
+                }
+                else if (state == 10)
+                {
                     if (tryToSendDcsBiosMessage(msg_, "10"))
                         lastState_ = state;
+                }
             }
         }
     }
@@ -86,18 +105,6 @@ public:
         divisor = divisor_;
         lastState_ = readState();
         numOfSteps = numOfSteps_;
-    }
-
-
-    void pollInputCurrent()
-    {
-        char state = readState();
-        char buf[7];
-        utoa(state, buf, 10);
-        if (tryToSendDcsBiosMessage(msg_, buf))
-        lastState_ = state;
-
-        delay(100); // Thats a long time.  Why?
     }
 
     void SetControl(const char *msg)

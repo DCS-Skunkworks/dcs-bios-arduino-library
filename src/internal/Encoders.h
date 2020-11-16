@@ -68,14 +68,10 @@ namespace DcsBios {
 				lastState_ = readState();
 			}
 
-			//////////////////////////////////////////
-			//	Inserted Code
-			//
-				void SetControl( const char* msg )
-				{
-					msg_ = msg;
-				}
-
+			void SetControl( const char* msg )
+			{
+				msg_ = msg;
+			}
 	};
 }
 

@@ -17,19 +17,15 @@ namespace DcsBios {
 			}
 			virtual void loop() {
 				if (hasUpdatedData()) {
-					analogWrite(pin_, getData()/255);
-					} 
-				}
-				
-			//////////////////////////////////////////
-			//	Inserted Code
-			//
-				void SetControl( const char* msg )
-				{
-					msg_ = msg;
-				}
-
-			};
+				analogWrite(pin_, getData()/255);
+				} 
+			}
+			
+			void SetControl( const char* msg )
+			{
+				msg_ = msg;
+			}
+		};
 
 }
 
