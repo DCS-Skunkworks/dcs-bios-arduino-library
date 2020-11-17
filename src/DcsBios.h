@@ -106,6 +106,9 @@ do not come with their own build system, we are just putting everything into the
 			DcsBios::PollingInput::setMessageSentOrQueued();
 			return true;
 		}
+		void resetAllStates() {
+			PollingInput::resetAllStates();
+		}
 	}
 #endif
 
