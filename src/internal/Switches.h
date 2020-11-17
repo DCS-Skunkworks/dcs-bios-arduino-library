@@ -3,13 +3,8 @@
 
 #include <math.h>
 #include "Arduino.h"
-#include "SwitchMatrix.h"
-
-SwitchMatrix swPanel = SwitchMatrix();
 
 namespace DcsBios {
-
-	
 	class Switch2Pos : PollingInput {
 		private:
 			const char* msg_;
@@ -110,7 +105,6 @@ namespace DcsBios {
 			}
 	};
 
-	
 	class SwitchMultiPos : PollingInput {
 		private:
 			const char* msg_;
@@ -156,177 +150,7 @@ namespace DcsBios {
 			{
 				msg_ = msg;
 			}
-	};
-
-	class Matrix2Pos : PollingInput {
-		private:
-			const char* msg_;
-			char row_;
-			char col_;
-			char lastState_;
-			bool reverse_;
-			void init_(const char* msg, char row, char col, bool reverse) {
-				msg_ = msg;
-				row_ = row;
-				col_ = col;
-				lastState_ = swPanel.GetSwitchState(row_, col_);
-				reverse_ = reverse;
-			}
-			void pollInput() {
-				char state = swPanel.GetSwitchState(row_, col_);
-				if (reverse_) state = !state;
-				if (state != lastState_) {
-					if (tryToSendDcsBiosMessage(msg_, state == false ? "0" : "1")) {
-						lastState_ = state;
-					}
-				}
-			}
-		public:
-			Matrix2Pos(const char* msg, char row, char col, bool reverse) { init_(msg, row, col, reverse); }
-			Matrix2Pos(const char* msg, char row, char col) { init_(msg, row, col, false); }
-	};
-	
-			class Matrix3Pos : PollingInput {
-		private:
-			const char* msg_;
-			char rowA_;
-			char colA_;
-			char rowB_;
-			char colB_;
-			char lastState_;
-			char readState() {
-				if (swPanel.GetSwitchState(rowA_, colA_) == true) return 0;
-				if (swPanel.GetSwitchState(rowB_, colB_) == true) return 2;
-				return 1;
-			}
-			void pollInput() {
-				char state = readState();
-				if (state != lastState_) {
-					if (state == 0)
-					{
-						if (tryToSendDcsBiosMessage(msg_, "0"))
-							lastState_ = state;
-					}
-					else if (state == 1)
-					{
-						if (tryToSendDcsBiosMessage(msg_, "1"))
-							lastState_ = state;
-					}
-					else if (state == 2)
-					{
-						if(tryToSendDcsBiosMessage(msg_, "2"))
-							lastState_ = state;
-					}
-				}
-			}
-		public:
-			Matrix3Pos(const char* msg, char rowA, char colA, char rowB, char colB) {
-				msg_ = msg;
-				colA_ = colA;
-				rowA_ = rowA;
-				colB_ = colB;
-				rowB_ = rowB;
-				lastState_ = readState();
-			}
-	};
-	
-			class AnalogMultiPos : PollingInput {
-		private:
-			const char* msg_;
-			char pin_;
-			char numOfSteps;
-			int divisor;
-			char lastState_;
-			char readState() {
-				if (round(analogRead(pin_)/divisor) == 0) return 0;
-				if (round(analogRead(pin_)/divisor) == 1) return 1;
-				if (analogRead(pin_)/divisor == 2) return 2;
-				if (analogRead(pin_)/divisor == 3) return 3;
-				if (analogRead(pin_)/divisor == 4) return 4;
-				if (analogRead(pin_)/divisor == 5) return 5;
-				if (analogRead(pin_)/divisor == 6) return 6;
-				if (analogRead(pin_)/divisor == 7) return 7;
-				if (analogRead(pin_)/divisor == 8) return 8;
-				if (analogRead(pin_)/divisor == 9) return 9;
-				if (analogRead(pin_)/divisor == 10) return 10;
-			}
-			void resetState()
-			{
-				lastState_ = (lastState_==0)?-1:0;
-			}
-			void pollInput() {
-				char state = readState();
-				if (state != lastState_) {
-					if (state == 0)
-					{
-						if (tryToSendDcsBiosMessage(msg_, "0"))
-							lastState_ = state;
-					}
-					else if (state == 1)
-					{
-						if (tryToSendDcsBiosMessage(msg_, "1"))
-							lastState_ = state;
-					}
-					else if (state == 2)
-					{
-						if(tryToSendDcsBiosMessage(msg_, "2"))
-							lastState_ = state;
-					}
-					else if (state == 3)
-					{
-						if(tryToSendDcsBiosMessage(msg_, "3"))
-							lastState_ = state;
-					}
-					else if (state == 4)
-					{
-						if(tryToSendDcsBiosMessage(msg_, "4"))
-							lastState_ = state;
-					}
-					else if (state == 5)
-					{
-						if(tryToSendDcsBiosMessage(msg_, "5"))
-							lastState_ = state;
-					}
-					else if (state == 6)
-					{
-						if(tryToSendDcsBiosMessage(msg_, "6"))
-							lastState_ = state;
-					}
-					else if (state == 7)
-					{
-						if(tryToSendDcsBiosMessage(msg_, "7"))
-							lastState_ = state;
-					}
-					else if (state == 8)
-					{
-						if(tryToSendDcsBiosMessage(msg_, "8"))
-							lastState_ = state;
-					}
-					else if (state == 9)
-					{
-						if(tryToSendDcsBiosMessage(msg_, "9"))
-							lastState_ = state;
-					}
-					else if (state == 10)
-					{
-						if(tryToSendDcsBiosMessage(msg_, "10"))
-							lastState_ = state;
-					}
-				}
-			}
-		public:
-			AnalogMultiPos(const char* msg, char pin, char numOfSteps, char divisor_) {
-				msg_ = msg;
-				pin_ = pin;
-				divisor = divisor_;
-				lastState_ = readState();
-			}
-			
-			void SetControl( const char* msg )
-			{
-				msg_ = msg;
-			}
-		};	
+	};	
 }
 
 #endif	
