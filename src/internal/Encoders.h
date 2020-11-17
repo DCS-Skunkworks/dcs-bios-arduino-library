@@ -23,6 +23,10 @@ namespace DcsBios {
 			char readState() {
 				return (digitalRead(pinA_) << 1) | digitalRead(pinB_);
 			}
+			void resetState()
+			{
+				lastState_ = (lastState_==0)?-1:0;
+			}
 			void pollInput() {
 				char state = readState();
 				switch(lastState_) {

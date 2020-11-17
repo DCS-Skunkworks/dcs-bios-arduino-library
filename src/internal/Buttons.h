@@ -10,6 +10,12 @@ namespace DcsBios {
 			const char* arg_;
 			char pin_;
 			char lastState_;
+
+			void resetState()
+			{
+				lastState_ = (lastState_==0)?-1:0;
+			}
+			
 			void pollInput() {
 				char state = digitalRead(pin_);
 				if (state != lastState_) {
