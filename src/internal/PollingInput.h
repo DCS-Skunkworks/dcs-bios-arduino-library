@@ -54,10 +54,7 @@ namespace DcsBios {
 				
 				do { // step through circular linked list
 					pi->resetState();
-					
-					// make linked list circular if it is not already
-					if (pi->nextPollingInput == NULL) pi->nextPollingInput = firstPollingInput;
-					
+									
 					pi = pi->nextPollingInput;
 				} while (pi != firstPollingInput); // util we get back to the start
 			}
