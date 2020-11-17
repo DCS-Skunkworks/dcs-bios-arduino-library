@@ -7,7 +7,7 @@ namespace DcsBios {
 
 class BcdWheel : PollingInput {
 		private:
-			char* msg_;
+			const char* msg_;
 			char pinA_;
 			char pinB_;
 			char pinC_;
@@ -17,57 +17,42 @@ class BcdWheel : PollingInput {
 				int total = 0;
 				if (digitalRead(pinA_) == LOW) {total+=1;}
 				if (digitalRead(pinB_) == LOW) {total+=2;}
-				if (digitalRead(pinC_) == LOW) {total+=4;}
-				if (digitalRead(pinD_) == LOW) {total+=8;}
-		
+				if( pinC_ ) {
+					if (digitalRead(pinC_) == LOW) {total+=4;}
+				}
+				if( pinD_ ) {
+					if (digitalRead(pinD_) == LOW) {total+=8;}
+				}
 				return total;
+			}			
+			void resetState()
+			{
+				lastState_ = (lastState_==0)?-1:0;
 			}
 			void pollInput() {
 				char state = readState();
 				if (state != lastState_) {
-					if (state == 0)
-						if (tryToSendDcsBiosMessage(msg_, "0"))
-							lastState_ = state;
-					if (state == 1)
-						if (tryToSendDcsBiosMessage(msg_, "0.1"))
-							lastState_ = state;
-					if (state == 2)
-						if (tryToSendDcsBiosMessage(msg_, "0.2"))
-							lastState_ = state;
-					if (state == 3)
-						if (tryToSendDcsBiosMessage(msg_, "0.3"))
-							lastState_ = state;
-					if (state == 4)
-						if (tryToSendDcsBiosMessage(msg_, "0.4"))
-							lastState_ = state;
-					if (state == 5)
-						if (tryToSendDcsBiosMessage(msg_, "0.5"))
-							lastState_ = state;
-					if (state == 6)
-						if (tryToSendDcsBiosMessage(msg_, "0.6"))
-							lastState_ = state;
-					if (state == 7)
-						if (tryToSendDcsBiosMessage(msg_, "0.7"))
-							lastState_ = state;
-					if (state == 8)
-						if (tryToSendDcsBiosMessage(msg_, "0.8"))
-							lastState_ = state;	
-					if (state == 9)
-						if (tryToSendDcsBiosMessage(msg_, "0.9"))
-							lastState_ = state;	
+					char szBody[2];
+					szBody[0] = state+48;
+					szBody[1] = 0;
+					if (tryToSendDcsBiosMessage(msg_, szBody))
+						lastState_ = state;
 				}
 			}
 		public:
-			BcdWheel(char* msg, char pinA, char pinB, char pinC, char pinD){
-				msg_ = msg;
+			BcdWheel(const char* msg, char pinA, char pinB, char pinC=0, char pinD=0):
+				msg_(msg)
+			{
 				pinA_ = pinA;
 				pinB_ = pinB;
 				pinC_ = pinC;
 				pinD_ = pinD;
 				pinMode(pinA_, INPUT_PULLUP);
 				pinMode(pinB_, INPUT_PULLUP);
-				pinMode(pinC_, INPUT_PULLUP);
-				pinMode(pinD_, INPUT_PULLUP);
+				if( pinC_ != 0)
+					pinMode(pinC_, INPUT_PULLUP);
+				if( pinD_ != 0 )
+					pinMode(pinD_, INPUT_PULLUP);
 				lastState_ = readState();
 			}
 	};
