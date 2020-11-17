@@ -19,6 +19,9 @@
 #define USART0_RX_vect USART_RX_vect
 #define USART0_TX_vect USART_TX_vect
 #define USART0_UDRE_vect USART_UDRE_vect
+#endif
+
+#ifndef PRR0
 #define PRR0 PRR
 #endif
 
@@ -106,7 +109,6 @@ do not come with their own build system, we are just putting everything into the
 	}
 #endif
 
-
 #include "internal/Buttons.h"
 #include "internal/Switches.h"
 #include "internal/Encoders.h"
@@ -141,6 +143,7 @@ namespace DcsBios {
 		return true;
 	}
 }
+
 // for backwards compatibility, can be removed when we have a proper place to document this interface:
 inline bool sendDcsBiosMessage(const char* msg, const char* arg) {
 	while(!DcsBios::tryToSendDcsBiosMessage(msg, arg));
