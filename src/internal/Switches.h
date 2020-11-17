@@ -12,7 +12,7 @@ namespace DcsBios {
 			char lastState_;
 			char switchState_;
 			bool reverse_;
-			unsigned long debounceDelay_; 
+			unsigned long debounceDelay_;
 			unsigned long lastDebounceTime = 0;
 			void init_(const char* msg, char pin, bool reverse, unsigned long debounceDelay) {
 				msg_ = msg;
@@ -41,7 +41,8 @@ namespace DcsBios {
 						}
 					}
 				}
-						lastState_ = state;
+
+				lastState_ = state;
 			}
 		public:
 			Switch2Pos(const char* msg, char pin, bool reverse, unsigned long debounceDelay) { init_(msg, pin, reverse, debounceDelay); }
@@ -60,6 +61,10 @@ namespace DcsBios {
 			char pinA_;
 			char pinB_;
 			char lastState_;
+			char steadyState_;
+			unsigned long debounceDelay_;
+			unsigned long lastDebounceTime = 0;
+
 			char readState() {
 				if (digitalRead(pinA_) == LOW) return 0;
 				if (digitalRead(pinB_) == LOW) return 2;
@@ -68,35 +73,47 @@ namespace DcsBios {
 			void resetState()
 			{
 				lastState_ = (lastState_==0)?-1:0;
+				steadyState_ = lastState_;
 			}
 			void pollInput() {
 				char state = readState();
 				if (state != lastState_) {
-					if (state == 0)
-					{
-						if (tryToSendDcsBiosMessage(msg_, "0"))
-							lastState_ = state;
-					}
-					else if (state == 1)
-					{
-						if (tryToSendDcsBiosMessage(msg_, "1"))
-							lastState_ = state;
-					}
-					else if (state == 2)
-					{
-						if(tryToSendDcsBiosMessage(msg_, "2"))
-							lastState_ = state;
+					lastDebounceTime = millis();
+				}
+
+				if ((millis() - lastDebounceTime) > debounceDelay_)
+				{
+					if (state != steadyState_) {
+						if (state == 0)
+						{
+							if (tryToSendDcsBiosMessage(msg_, "0"))
+								steadyState_ = state;
+						}
+						else if (state == 1)
+						{
+							if (tryToSendDcsBiosMessage(msg_, "1"))
+								steadyState_ = state;
+						}
+						else if (state == 2)
+						{
+							if(tryToSendDcsBiosMessage(msg_, "2"))
+								steadyState_ = state;
+						}
 					}
 				}
+
+				lastState_ = state;
 			}
 		public:
-			Switch3Pos(const char* msg, char pinA, char pinB) {
+			Switch3Pos(const char* msg, char pinA, char pinB, unsigned long debounceDelay = 50) {
 				msg_ = msg;
 				pinA_ = pinA;
 				pinB_ = pinB;
 				pinMode(pinA_, INPUT_PULLUP);
 				pinMode(pinB_, INPUT_PULLUP);
 				lastState_ = readState();
+				steadyState_ = lastState_;
+				debounceDelay_ = debounceDelay;
 			}
 			
 			void SetControl( const char* msg )
