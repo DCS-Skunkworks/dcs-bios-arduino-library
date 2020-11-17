@@ -1,1 +1,1 @@
-DcsBios	KEYWORD1
+DcsBiosFP	KEYWORD1
