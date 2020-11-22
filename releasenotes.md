@@ -28,6 +28,16 @@ First version released after forking from the dcs-bios repo.  Several changes ar
 
 - Added debounce support for Switch3Pos
 
+- Made pollIntervalMs available to every control, via new templates.  Use this if you want to throttle how frequently a control will be polled (and therefor how often it can send messages to DCS).  For example:
+
+  ```c++
+  typedef Switch3PosT<100> MyThrottledSwitch3Pos;
+  MyThrottledSwitch3Pos efcpAileronEmerDisengage("EFCP_AILERON_EMER_DISENGAGE", 7, 8);
+  // efcpAileronEmerDisengage will not send messages to DCS faster than 10/second.
+  ```
+
+  
+
 ---------
 v0.2.22
 ---------
