@@ -40,7 +40,8 @@ class BcdWheel : PollingInput {
 				}
 			}
 		public:
-			BcdWheel(const char* msg, char pinA, char pinB, char pinC=0, char pinD=0):
+			BcdWheel(const char* msg, char pinA, char pinB, char pinC=0, char pinD=0, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs),
 				msg_(msg)
 			{
 				pinA_ = pinA;
@@ -145,7 +146,8 @@ class BcdWheel : PollingInput {
 		}
 			}
 		public:
-			RadioPreset(char* msg, char pinA, char pinB, char pinC, char pinD, char pinE){
+			RadioPreset(char* msg, char pinA, char pinB, char pinC, char pinD, char pinE, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs){
 				msg_ = msg;
 				pinA_ = pinA;
 				pinB_ = pinB;

@@ -14,15 +14,7 @@ namespace DcsBios {
 			bool reverse_;
 			unsigned long debounceDelay_;
 			unsigned long lastDebounceTime = 0;
-			void init_(const char* msg, char pin, bool reverse, unsigned long debounceDelay) {
-				msg_ = msg;
-				pin_ = pin;
-				pinMode(pin_, INPUT_PULLUP);
-				switchState_ = digitalRead(pin_);
-				lastState_ = switchState_;
-				reverse_ = reverse;
-				debounceDelay_ = debounceDelay;
-			}
+
 			void resetState()
 			{
 				lastState_ = (lastState_==0)?-1:0;
@@ -45,9 +37,17 @@ namespace DcsBios {
 				lastState_ = state;
 			}
 		public:
-			Switch2Pos(const char* msg, char pin, bool reverse, unsigned long debounceDelay) { init_(msg, pin, reverse, debounceDelay); }
-			Switch2Pos(const char* msg, char pin, bool reverse) { init_(msg, pin, reverse, 50); }
-			Switch2Pos(const char* msg, char pin) { init_(msg, pin, false, 50); }
+			Switch2Pos(const char* msg, char pin, bool reverse = false, unsigned long debounceDelay = 50, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs)
+			{ 
+				msg_ = msg;
+				pin_ = pin;
+				pinMode(pin_, INPUT_PULLUP);
+				switchState_ = digitalRead(pin_);
+				lastState_ = switchState_;
+				reverse_ = reverse;
+				debounceDelay_ = debounceDelay;
+			}
 					
 			void SetControl( const char* msg )
 			{
@@ -105,7 +105,9 @@ namespace DcsBios {
 				lastState_ = state;
 			}
 		public:
-			Switch3Pos(const char* msg, char pinA, char pinB, unsigned long debounceDelay = 50) {
+			Switch3Pos(const char* msg, char pinA, char pinB, unsigned long debounceDelay = 50, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs)
+			{
 				msg_ = msg;
 				pinA_ = pinA;
 				pinB_ = pinB;
@@ -151,7 +153,10 @@ namespace DcsBios {
 				}
 			}
 		public:
-			SwitchMultiPos(const char* msg, const byte* pins, char numberOfPins, bool reverse = false) : lastState_(0) {
+			SwitchMultiPos(const char* msg, const byte* pins, char numberOfPins, bool reverse = false, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs),
+				lastState_(0)
+			{
 				msg_ = msg;
 				pins_ = pins;
 				reverse_ = reverse;

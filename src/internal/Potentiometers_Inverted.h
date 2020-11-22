@@ -6,14 +6,10 @@
 #include "PollingInput.h"
 
 namespace DcsBios {
-	template <unsigned int pollInterval = 5, unsigned int hysteresis = 128, unsigned int ewma_divisor = 5>
+	template < unsigned int hysteresis = 128, unsigned int ewma_divisor = 5>
 	class PotentiometerInvEWMA : PollingInput {
 		private:
 			void pollInput() {
-				unsigned long now = millis();
-				if ((now - lastPollTime_) < pollInterval) return;
-				lastPollTime_ = now;
-				
 				unsigned int state = map(analogRead(pin_), 1023, 0, 0, 65535);
 				accumulator += ((float)state - accumulator) / (float)ewma_divisor;
 				state = (unsigned int)accumulator;
@@ -33,15 +29,14 @@ namespace DcsBios {
 			char pin_;
 			unsigned int lastState_;
 			float accumulator;
-			unsigned long lastPollTime_;
 			
 		public:
-			PotentiometerInvEWMA(const char* msg, char pin) {
+			PotentiometerInvEWMA(const char* msg, char pin, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs) {
 				msg_ = msg;
 				pin_ = pin;
 				pinMode(pin_, INPUT);
 				lastState_ = (float)map(analogRead(pin_), 0, 1023, 0, 65535);
-				lastPollTime_ = millis();
 			}
 	};
 

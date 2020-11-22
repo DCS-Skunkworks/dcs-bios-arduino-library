@@ -60,7 +60,8 @@ namespace DcsBios {
 				}
 			}
 		public:
-			RotaryEncoder(const char* msg, const char* decArg, const char* incArg, char pinA, char pinB, StepsPerDetent stepsPerDetent = ONE_STEP_PER_DETENT) {
+			RotaryEncoder(const char* msg, const char* decArg, const char* incArg, char pinA, char pinB, StepsPerDetent stepsPerDetent = ONE_STEP_PER_DETENT, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs) {
 				msg_ = msg;
 				decArg_ = decArg;
 				incArg_ = incArg;
@@ -195,7 +196,8 @@ namespace DcsBios {
 			}
 		}
 	public:
-		RotaryAcceleratedEncoder(const char* msg, const char* decArg, const char* incArg, const char* fastDecArg, const char* fastIncArg, char pinA, char pinB, StepsPerDetent stepsPerDetent = ONE_STEP_PER_DETENT)
+		RotaryAcceleratedEncoder(const char* msg, const char* decArg, const char* incArg, const char* fastDecArg, const char* fastIncArg, char pinA, char pinB, StepsPerDetent stepsPerDetent = ONE_STEP_PER_DETENT, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs)
 		{
 			msg_ = msg;
 			decArg_ = decArg;

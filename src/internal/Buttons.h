@@ -15,7 +15,7 @@ namespace DcsBios {
 			{
 				lastState_ = (lastState_==0)?-1:0;
 			}
-			
+
 			void pollInput() {
 				char state = digitalRead(pin_);
 				if (state != lastState_) {
@@ -26,7 +26,9 @@ namespace DcsBios {
 				}
 			}
 		public:
-			ActionButton(const char* msg, const char* arg, char pin) {
+			ActionButton(const char* msg, const char* arg, char pin, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs)
+			{
 				msg_ = msg;
 				arg_ = arg;
 				pin_ = pin;
@@ -65,7 +67,8 @@ namespace DcsBios {
 
 		public:
       //init now expects a message (the identifier you are trying to control), an argument ("TOGGLE") and an address to a storage variable
-			MatActionButton(const char* msg, const char* arg, volatile unsigned char* argAddress) {
+			MatActionButton(const char* msg, const char* arg, volatile unsigned char* argAddress, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs) {
 				msg_ = msg;
 				arg_ = arg;
 				address = argAddress;
@@ -96,7 +99,9 @@ namespace DcsBios {
 
 		public:
       //init now expects a message (the identifier you are trying to control), an argument ("TOGGLE") and an address to a storage variable
-			MatActionButtonToggle(const char* msg, const char* arg, volatile unsigned char* argAddress) {
+			MatActionButtonToggle(const char* msg, const char* arg, volatile unsigned char* argAddress, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs)
+			{
 				msg_ = msg;
 				arg_ = arg;
 				address = argAddress;
@@ -130,7 +135,9 @@ namespace DcsBios {
 
 		public:
       //init now expects row and column, as well as an array pointer, instead of a pin
-			MatActionButtonSet(const char* msg, volatile unsigned char* argAddress, char onLvlArg) {
+			MatActionButtonSet(const char* msg, volatile unsigned char* argAddress, char onLvlArg, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs)
+			{
 				msg_ = msg;
 				address = argAddress;
 				onLvl = onLvlArg;

@@ -96,7 +96,8 @@ namespace DcsBios {
         }
 
     public:
-        AnalogMultiPos(const char *msg, char pin, char numOfSteps_, int divisor_)
+        AnalogMultiPos(const char *msg, char pin, char numOfSteps_, int divisor_, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+				PollingInput(pollIntervalMs)
         {
             msg_ = msg;
             pin_ = pin;
