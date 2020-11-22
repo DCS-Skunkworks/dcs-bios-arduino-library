@@ -4,7 +4,9 @@
 #include "Arduino.h"
 
 namespace DcsBios {
-    class AnalogMultiPos : PollingInput
+
+    template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
+    class AnalogMultiPosT : PollingInput
     {
     private:
         const char *msg_;
@@ -96,7 +98,7 @@ namespace DcsBios {
         }
 
     public:
-        AnalogMultiPos(const char *msg, char pin, char numOfSteps_, int divisor_, unsigned long pollIntervalMs = POLL_EVERY_TIME) :
+        AnalogMultiPosT(const char *msg, char pin, char numOfSteps_, int divisor_) :
 				PollingInput(pollIntervalMs)
         {
             msg_ = msg;
@@ -111,5 +113,7 @@ namespace DcsBios {
             msg_ = msg;
         }
     };
+
+    typedef AnalogMultiPosT<> AnalogMultiPos;
 }
 #endif

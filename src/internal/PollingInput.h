@@ -71,8 +71,7 @@ namespace DcsBios {
 					pi = pi->nextPollingInput;
 				} while (pi != firstPollingInput); // util we get back to the start
 			}
-	};
-	
+	};	
 }
 
 #endif
