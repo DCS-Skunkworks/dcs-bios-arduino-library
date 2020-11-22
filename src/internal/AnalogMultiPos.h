@@ -12,7 +12,7 @@ namespace DcsBios {
         char numOfSteps;
         int divisor;
         char lastState_;
-        int period = 750;
+        unsigned long period = 750;
         unsigned long time_now = 0;
 
         char readState()

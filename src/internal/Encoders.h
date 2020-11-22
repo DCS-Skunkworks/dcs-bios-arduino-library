@@ -93,8 +93,8 @@ namespace DcsBios {
 		char stepsPerDetent_;
 		char cw_momentum_;
 
-		const long FAST_THRESHOLD_MS=175;
-		const long STOPPED_THRESHOLD_MS=500;
+		const unsigned long FAST_THRESHOLD_MS=175;
+		const unsigned long STOPPED_THRESHOLD_MS=500;
 		const char MAX_MOMENTUM=4;
 
 		unsigned long timeLastDetent_;
@@ -161,7 +161,7 @@ namespace DcsBios {
 					cw_momentum_--;
 				}
 			}else{
-				if( (long)(millis() - timeLastDetent_) > STOPPED_THRESHOLD_MS )
+				if( (millis() - timeLastDetent_) > STOPPED_THRESHOLD_MS )
 				cw_momentum_ = 0;
 			}
 
@@ -169,7 +169,7 @@ namespace DcsBios {
 			
 			if (delta_ >= stepsPerDetent_) {
 				const char *arg;
-				if( (long)(millis() - timeLastDetent_) < FAST_THRESHOLD_MS )
+				if( (millis() - timeLastDetent_) < FAST_THRESHOLD_MS )
 					arg = fastIncArg_;
 				else
 					arg = incArg_;
@@ -182,7 +182,7 @@ namespace DcsBios {
 			}
 			else if (delta_ <= -stepsPerDetent_) {
 				const char *arg;
-				if( (long)(millis() - timeLastDetent_) < FAST_THRESHOLD_MS )
+				if( (millis() - timeLastDetent_) < FAST_THRESHOLD_MS )
 					arg = fastDecArg_;
 				else
 					arg = decArg_;
