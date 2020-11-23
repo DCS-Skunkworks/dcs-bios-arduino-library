@@ -9,27 +9,41 @@ static bool messageSentOrQueued;
 
 namespace DcsBios {
 
+	// TODO: All the optional parameters kinda suck... conisder pulling that template approach from potentiometers?
 	class PollingInput {
 		private:
+			virtual void resetState() = 0;
 			virtual void pollInput() = 0;
+			#define POLL_EVERY_TIME 0
+			unsigned long pollingIntervalMs;
+			unsigned long lastPollTime;
 			PollingInput* nextPollingInput;
 		public:
 			static PollingInput* firstPollingInput;
 			static void setMessageSentOrQueued() { messageSentOrQueued = true; }
-			PollingInput() {
+			PollingInput(unsigned long pollIntervalMs) {
 				this->nextPollingInput = firstPollingInput;
 				firstPollingInput = this;
+				lastPollTime = 0;
+				pollingIntervalMs = pollIntervalMs;
 			}
 			static void pollInputs() {
 				PollingInput* pi = firstPollingInput;
 				if (!pi) return;
+
+				unsigned long now = millis();
 				
 				PollingInput* lastSender = NULL;
 				do { // step through circular linked list
 					messageSentOrQueued = false;
-					pi->pollInput();
-					if (messageSentOrQueued) {
-						lastSender = pi;
+
+					if( now - pi->lastPollTime > pi->pollingIntervalMs )
+					{
+						pi->pollInput();
+						if (messageSentOrQueued) {
+							lastSender = pi;
+						}
+						pi->lastPollTime = now;
 					}
 					
 					// make linked list circular if it is not already
@@ -45,8 +59,19 @@ namespace DcsBios {
 					firstPollingInput = lastSender->nextPollingInput;
 				}
 			}
-	};
-	
+
+			static void resetAllStates() 
+			{
+				PollingInput* pi = firstPollingInput;
+				if (!pi) return;
+				
+				do { // step through circular linked list
+					pi->resetState();
+									
+					pi = pi->nextPollingInput;
+				} while (pi != firstPollingInput); // util we get back to the start
+			}
+	};	
 }
 
 #endif

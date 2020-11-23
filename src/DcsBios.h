@@ -19,6 +19,9 @@
 #define USART0_RX_vect USART_RX_vect
 #define USART0_TX_vect USART_TX_vect
 #define USART0_UDRE_vect USART_UDRE_vect
+#endif
+
+#ifndef PRR0
 #define PRR0 PRR
 #endif
 
@@ -42,7 +45,7 @@ do not come with their own build system, we are just putting everything into the
 
 	namespace DcsBios {
 		ProtocolParser parser;
-		
+
 		ISR(USART0_RX_vect) {
 			volatile uint8_t c = UDR0;
 			parser.processCharISR(c);
@@ -56,13 +59,15 @@ do not come with their own build system, we are just putting everything into the
 			UCSR0C = (1<<UCSZ00) | (1<<UCSZ01);
 			
 			UCSR0B = (1<<RXEN0) | (1<<TXEN0) | (1<<RXCIE0);
-			
-			
 		}
 		
 		void loop() {
 			PollingInput::pollInputs();
 			ExportStreamListener::loopAll();
+		}
+
+		void resetAllStates() {
+			PollingInput::resetAllStates();
 		}
 		
 		static void usart_tx(const char* str) {
@@ -101,9 +106,11 @@ do not come with their own build system, we are just putting everything into the
 			DcsBios::PollingInput::setMessageSentOrQueued();
 			return true;
 		}
+		void resetAllStates() {
+			PollingInput::resetAllStates();
+		}
 	}
 #endif
-
 
 #include "internal/Buttons.h"
 #include "internal/Switches.h"
@@ -139,6 +146,7 @@ namespace DcsBios {
 		return true;
 	}
 }
+
 // for backwards compatibility, can be removed when we have a proper place to document this interface:
 inline bool sendDcsBiosMessage(const char* msg, const char* arg) {
 	while(!DcsBios::tryToSendDcsBiosMessage(msg, arg));

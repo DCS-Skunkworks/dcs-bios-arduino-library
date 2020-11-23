@@ -7,14 +7,14 @@
 
 namespace DcsBios {
 
-	template <unsigned int pollInterval = 5, unsigned int hysteresis = 128, unsigned int ewma_divisor = 5>
+	template <unsigned long pollIntervalMs = POLL_EVERY_TIME, unsigned int hysteresis = 128, unsigned int ewma_divisor = 5>
 	class PotentiometerEWMA : PollingInput {
 		private:
+			void resetState()
+			{
+				lastState_ = (lastState_==0)?-1:0;
+			}
 			void pollInput() {
-				unsigned char now = (unsigned char)millis();
-				if ((unsigned char)(now - lastPollTime_) < pollInterval) return;
-				lastPollTime_ = now;
-				
 				unsigned int state = map(analogRead(pin_), 0, 1023, 0, 65535);
 				accumulator += ((float)state - accumulator) / (float)ewma_divisor;
 				state = (unsigned int)accumulator;
@@ -34,46 +34,22 @@ namespace DcsBios {
 			char pin_;
 			unsigned int lastState_;
 			float accumulator;
-			unsigned char lastPollTime_;
 			
 		public:
-			PotentiometerEWMA(const char* msg, char pin) {
+			PotentiometerEWMA(const char* msg, char pin) :
+				PollingInput(pollIntervalMs) {
 				msg_ = msg;
 				pin_ = pin;
 				pinMode(pin_, INPUT);
-				lastState_ = (float)map(analogRead(pin_), 0, 1023, 0, 65535);
-				lastPollTime_ = (unsigned char)millis();
+				lastState_ = (float)map(analogRead(pin_), 0, 1023, 0, 65535);	
 			}
-			
-			//////////////////////////////////////////
-			//	Inserted Code
-			//
-			
-				void pollInputCurrent() 
-					{
-						unsigned int state = map(analogRead(pin_), 0, 1023, 0, 65535);
-						
-						char buf[6];
-						utoa(state, buf, 10);
-						if (tryToSendDcsBiosMessage(msg_, buf))
-							lastState_ = state;
-							
-						delay(4);	
-											
-					}
-				
-				
-				
-				void SetControl( const char* msg )
-				{
-					msg_ = msg;
-				}
-				
-				
-	};
 
+			void SetControl( const char* msg )
+			{
+				msg_ = msg;
+			}
+	};
 	typedef PotentiometerEWMA<> Potentiometer;
-	
 }
 
 #endif
