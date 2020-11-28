@@ -11,19 +11,15 @@ namespace DcsBios {
     private:
         const char *msg_;
         char pin_;
-        char numOfSteps;
-        int divisor;
-        char lastState_;
+        unsigned char numOfSteps;
+        unsigned char lastState_;
         unsigned long period = 750;
         unsigned long time_now = 0;
 
-        char readState()
+        unsigned char readState()
         {
-            float fAnalogPct = analogRead(pin_) / 1024;
-
-            char result = (char)((numOfSteps-1) * fAnalogPct);
-
-            return result;
+            unsigned char state = map(analogRead(pin_), 0, 1023, 0, numOfSteps);
+            return state;
         }
 
         void resetState()
@@ -35,75 +31,25 @@ namespace DcsBios {
         {
             if (millis() > time_now + period)
             {
-                char state = readState();
-
+                unsigned char state = readState();
                 time_now = millis();
                 if (state != lastState_)
-                {
-                    if (state == 0)
-                    {
-                        if (tryToSendDcsBiosMessage(msg_, "0"))
+                {                    
+                    char cstr[5];
+                    itoa(state, cstr, 10);
+
+                    if (tryToSendDcsBiosMessage(msg_, cstr))
                             lastState_ = state;
-                    }
-                    else if (state == 1)
-                    {
-                        if (tryToSendDcsBiosMessage(msg_, "1"))
-                            lastState_ = state;
-                    }
-                    else if (state == 2)
-                    {
-                        if (tryToSendDcsBiosMessage(msg_, "2"))
-                            lastState_ = state;
-                    }
-                    else if (state == 3)
-                    {
-                        if (tryToSendDcsBiosMessage(msg_, "3"))
-                            lastState_ = state;
-                    }
-                    else if (state == 4)
-                    {
-                        if (tryToSendDcsBiosMessage(msg_, "4"))
-                            lastState_ = state;
-                    }
-                    else if (state == 5) {
-                        if (tryToSendDcsBiosMessage(msg_, "5"))
-                            lastState_ = state;
-                    }
-                    else if (state == 6) {
-                        if (tryToSendDcsBiosMessage(msg_, "6"))
-                            lastState_ = state;
-                    }
-                    else if (state == 7)
-                    {
-                        if (tryToSendDcsBiosMessage(msg_, "7"))
-                            lastState_ = state;
-                    }
-                    else if (state == 8)
-                    {
-                        if (tryToSendDcsBiosMessage(msg_, "8"))
-                            lastState_ = state;
-                    }
-                    else if (state == 9)
-                    {
-                        if (tryToSendDcsBiosMessage(msg_, "9"))
-                            lastState_ = state;
-                    }
-                    else if (state == 10)
-                    {
-                        if (tryToSendDcsBiosMessage(msg_, "10"))
-                            lastState_ = state;
-                    }
                 }
             }
         }
 
     public:
-        AnalogMultiPosT(const char *msg, char pin, char numOfSteps_, int divisor_) :
+        AnalogMultiPosT(const char *msg, char pin, char numOfSteps_) :
 				PollingInput(pollIntervalMs)
         {
             msg_ = msg;
             pin_ = pin;
-            divisor = divisor_;
             lastState_ = readState();
             numOfSteps = numOfSteps_;
         }
