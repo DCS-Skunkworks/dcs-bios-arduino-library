@@ -1,3 +1,7 @@
+## v0.3.1
+
+- Fix AnalogMultiPos as per [Analog Multipos does not send commands (github.com)](https://github.com/talbotmcinnis/dcs-bios-arduino-library/issues/2)
+
 ## v0.3.0
 
 First version released after forking from the dcs-bios repo.  Several changes are included and only vaguely documented as the primary developer becomes oriented within the project.
