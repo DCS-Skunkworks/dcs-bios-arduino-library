@@ -140,12 +140,17 @@ namespace DcsBios {
 		char lastState_;
 		bool reverse_;
 		char readState() {
-			unsigned char i;
-			for (i=0; i<numberOfPins_; i++) {
-				if (digitalRead(pins_[i]) == LOW && reverse_ == false) return i;
-				else if (digitalRead(pins_[i]) == HIGH && reverse_ == true) return i;
+			unsigned char ncPinIdx = lastState_;
+			for (unsigned char i=0; i<numberOfPins_; i++) {
+				if( pins_[i] == PIN_NC)
+					ncPinIdx = i;
+				else
+				{
+					if (digitalRead(pins_[i]) == LOW && reverse_ == false) return i;
+					else if (digitalRead(pins_[i]) == HIGH && reverse_ == true) return i;
+				}
 			}
-			return lastState_;
+			return ncPinIdx;
 		}
 		void resetState()
 		{
@@ -172,7 +177,8 @@ namespace DcsBios {
 			numberOfPins_ = numberOfPins;
 			unsigned char i;
 			for (i=0; i<numberOfPins; i++) {
-				pinMode(pins[i], INPUT_PULLUP);
+				if( pins[i] != PIN_NC)
+					pinMode(pins[i], INPUT_PULLUP);
 			}
 			lastState_ = readState();
 		}

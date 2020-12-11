@@ -25,6 +25,10 @@
 #define PRR0 PRR
 #endif
 
+namespace DcsBios {
+	const unsigned char PIN_NC = 0xFF;
+}
+
 /*
 The following is an ugly hack to work with the Arduino IDE's build system.
 The DCS-BIOS Arduino Library is configured with #defines such as DCSBIOS_RS485_MASTER or DCSBIOS_RS485_SLAVE <address>.

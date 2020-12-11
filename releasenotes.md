@@ -1,3 +1,11 @@
+## v0.3.2
+- Added new feature for SwitchMultiPos, allowing a "default" state to be specified for controls that can have a default state.  For example, A-10 Emergency Trim without a center detent
+```c++
+// Center pos is not connected, so define PIN_NC so that it will return to center when no other pin is active
+const byte efcpEmerTrimPins[5] = {DcsBios::PIN_NC, 2, 1, 3, 0};
+DcsBios::SwitchMultiPos efcpEmerTrim("EFCP_EMER_TRIM", efcpEmerTrimPins, 5);
+```
+
 ## v0.3.1
 
 - Fix AnalogMultiPos as per [Analog Multipos does not send commands (github.com)](https://github.com/talbotmcinnis/dcs-bios-arduino-library/issues/2)
