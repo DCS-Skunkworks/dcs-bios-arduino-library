@@ -30,7 +30,7 @@ namespace DcsBios {
 			
 			if ((millis() - lastDebounceTime) > debounceDelay_) {
 				if (state != switchState_) {
-				if (tryToSendDcsBiosMessage(msg_, state == HIGH ? "0" : "1")) {
+					if (tryToSendDcsBiosMessage(msg_, state == HIGH ? "0" : "1")) {
 						switchState_ = state;
 					}
 				}
