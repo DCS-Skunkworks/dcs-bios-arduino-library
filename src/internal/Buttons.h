@@ -44,6 +44,52 @@ namespace DcsBios {
 	};
 	typedef ActionButtonT<> ActionButton;
 	
+	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
+	class ToggleButtonT : PollingInput {
+		private:
+			const char* msg_;
+			const char* arg_A;
+			const char* arg_B;
+			char pin_;
+			char lastState_;
+			bool phase_;
+
+			void resetState()
+			{
+				lastState_ = (lastState_==0)?-1:0;
+			}
+
+			void pollInput() {
+				char state = digitalRead(pin_);
+				if (state != lastState_) {
+					if (lastState_ == HIGH && state == LOW) {
+						// Rising edge
+						while(!tryToSendDcsBiosMessage(msg_, phase_?arg_A:arg_B));
+						phase_ = !phase_;
+					}
+					lastState_ = state;
+				}
+			}
+		public:
+			ToggleButtonT(const char* msg, const char* argA, const char* argB, char pin)	 :
+				PollingInput(pollIntervalMs)
+			{
+				msg_ = msg;
+				arg_A = argA;
+				arg_B = argB;
+				pin_ = pin;
+				phase_ = false;
+				pinMode(pin_, INPUT_PULLUP);
+				lastState_ = digitalRead(pin_);
+			}
+
+			void SetControl( const char* msg )
+			{
+				msg_ = msg;
+			}
+	};
+	typedef ToggleButtonT<> ToggleButton;
+
   	//New Matrix-Compatible Button class
   	//This class expects char pointer to a storage variable. It will read the state of that variable instead of a physical pin.
 	//This class is used as a TOGGLE button.
