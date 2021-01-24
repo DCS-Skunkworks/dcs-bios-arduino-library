@@ -1,4 +1,4 @@
-#include "Protocol.h"
+#include "DcsProtocolParser.h"
 #include "PollingInput.h"
 #include "ExportStreamListener.h"
 #include "RingBuffer.h"
@@ -7,7 +7,7 @@ namespace DcsBios {
 	ExportStreamListener* ExportStreamListener::firstExportStreamListener = NULL;
 	PollingInput* PollingInput::firstPollingInput = NULL;
 
-	ProtocolParser::ProtocolParser() {
+	DcsProtocolParser::DcsProtocolParser() {
 		processingData = false;
 		state = DCSBIOS_STATE_WAIT_FOR_SYNC;
 		sync_byte_count = 0;
@@ -18,7 +18,7 @@ namespace DcsBios {
 		stores the character in a buffer, re-enables interrupts and processes the complete
 		buffer before returning to the main program.
 	*/
-	void ProtocolParser::processCharISR(unsigned char c) {
+	void DcsProtocolParser::processCharISR(unsigned char c) {
 		incomingDataBuffer.put(c);
 		if (processingData) return;
 		
@@ -37,7 +37,7 @@ namespace DcsBios {
 		}
 	}
 	
-	void ProtocolParser::processChar(unsigned char c) {
+	void DcsProtocolParser::processChar(unsigned char c) {
 	  switch(state) {
 		case DCSBIOS_STATE_WAIT_FOR_SYNC:
 			/* do nothing */
@@ -107,7 +107,7 @@ namespace DcsBios {
 			break;
 	  }
 
-	  if (c == 0x55)
+	  if (c == DCS_PROTO_SYNC_BYTE)
 		sync_byte_count++;
 	  else
 		sync_byte_count = 0;

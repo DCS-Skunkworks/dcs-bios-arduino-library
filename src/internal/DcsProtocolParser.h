@@ -1,5 +1,5 @@
-#ifndef __DCSBIOS_PROTOCOL_H
-#define __DCSBIOS_PROTOCOL_H
+#ifndef __DCSBIOS_DCSPROTOCOLPARSER_H
+#define __DCSBIOS_DCSPROTOCOLPARSER_H
 
 #define DCSBIOS_STATE_WAIT_FOR_SYNC 0
 #define DCSBIOS_STATE_ADDRESS_LOW 1
@@ -14,7 +14,7 @@
 
 namespace DcsBios {
 
-	class ProtocolParser {
+	class DcsProtocolParser {
 		private:
 			volatile unsigned char state;
 			volatile unsigned int address;
@@ -28,7 +28,7 @@ namespace DcsBios {
 		public:
 			void processChar(unsigned char c);
 			void processCharISR(unsigned char c);
-			ProtocolParser();
+			DcsProtocolParser();
 	};
 }
 

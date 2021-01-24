@@ -13,7 +13,7 @@
 
 #include "internal/ExportStreamListener.h"
 #include "internal/PollingInput.h"
-#include "internal/Protocol.h"
+#include "internal/DcsProtocolParser.h"
 
 #ifndef USART0_RX_vect
 #define USART0_RX_vect USART_RX_vect
@@ -27,6 +27,8 @@
 
 namespace DcsBios {
 	const unsigned char PIN_NC = 0xFF;
+	const unsigned char DCS_PROTO_SYNC_BYTE = 0x55;
+	const unsigned char MESSAGING_PROTO_SYNC_BYTE = 0x42;
 }
 
 /*
@@ -48,11 +50,11 @@ do not come with their own build system, we are just putting everything into the
 #ifdef DCSBIOS_IRQ_SERIAL
 
 	namespace DcsBios {
-		ProtocolParser parser;
+		DcsProtocolParser dcsProtocolParser;
 
 		ISR(USART0_RX_vect) {
 			volatile uint8_t c = UDR0;
-			parser.processCharISR(c);
+			dcsProtocolParser.processCharISR(c);
 		}
 		
 		void setup() {
@@ -94,13 +96,13 @@ do not come with their own build system, we are just putting everything into the
 #endif
 #ifdef DCSBIOS_DEFAULT_SERIAL
 	namespace DcsBios {
-		ProtocolParser parser;
+		DcsProtocolParser dcsProtocolParser;
 		void setup() {
 			Serial.begin(250000);
 		}
 		void loop() {
 			while (Serial.available()) {
-				parser.processChar(Serial.read());
+				dcsProtocolParser.processChar(Serial.read());
 			}
 			PollingInput::pollInputs();
 			ExportStreamListener::loopAll();			
