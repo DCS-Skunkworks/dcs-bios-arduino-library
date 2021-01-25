@@ -14,7 +14,7 @@
 
 namespace DcsBios {
 	
-	ProtocolParser protocolParser;
+	ProtocolParser parser;
 	DcsBios::RingBuffer<32> messageBuffer;
 	
 

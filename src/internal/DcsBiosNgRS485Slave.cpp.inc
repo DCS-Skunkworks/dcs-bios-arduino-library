@@ -107,7 +107,7 @@ namespace DcsBios {
 			case RX_WAIT_DATA:
 				rxtx_len--;
 				if (rx_datatype == RXDATA_DCSBIOS_EXPORT) {
-					protocolParser.processCharISR(c);
+					parser.processCharISR(c);
 				}
 				if (rxtx_len == 0) {
 					state = RX_WAIT_CHECKSUM;
