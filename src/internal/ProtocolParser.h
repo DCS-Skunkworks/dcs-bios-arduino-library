@@ -10,11 +10,12 @@
 #define DCSBIOS_STATE_DATA_HIGH 6
 
 #include "ExportStreamListener.h"
+#include "NonDcsStreamListener.h"
 #include "RingBuffer.h"
 
 namespace DcsBios {
 
-	class DcsProtocolParser {
+	class ProtocolParser {
 		private:
 			volatile unsigned char state;
 			volatile unsigned int address;
@@ -23,12 +24,13 @@ namespace DcsBios {
 			volatile unsigned char sync_byte_count;
 			
 			ExportStreamListener* startESL;
+			NonDcsStreamListener* startNDSL;
 			RingBuffer<64> incomingDataBuffer;
 			volatile bool processingData;
 		public:
 			void processChar(unsigned char c);
 			void processCharISR(unsigned char c);
-			DcsProtocolParser();
+			ProtocolParser();
 	};
 }
 

@@ -102,7 +102,7 @@ namespace DcsBios {
 			case RX_WAIT_DATA:
 				rxtx_len--;
 				if (rx_datatype == RXDATA_DCSBIOS_EXPORT) {
-					dcsProtocolParser.processCharISR(c);
+					protocolParser.processCharISR(c);
 				}
 				if (rxtx_len == 0) {
 					state = RX_WAIT_CHECKSUM;
@@ -247,6 +247,7 @@ namespace DcsBios {
 	void loop() {
 		PollingInput::pollInputs();
 		ExportStreamListener::loopAll();
+		NonDcsStreamListener::loopAll();
 	}
 
 }
