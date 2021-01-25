@@ -42,12 +42,10 @@ namespace DcsBios {
 	void ProtocolParser::processChar(unsigned char c) {
 	  switch(state) {
 		case DCSBIOS_STATE_WAIT_FOR_SYNC:
-			if (startNDSL) {
-				NonDcsStreamListener* ndsl = startNDSL;
-				while(ndsl) {
-					ndsl->onDcsBiosWrite((char)c);
-					ndsl = ndsl->nextNonDcsStreamListener;
-				}
+			NonDcsStreamListener* ndsl = ExportStreamListener::firstExportStreamListener;
+			while(ndsl) {
+				ndsl->onDcsBiosWrite((char)c);
+				ndsl = ndsl->nextNonDcsStreamListener;
 			}
 
 			break;

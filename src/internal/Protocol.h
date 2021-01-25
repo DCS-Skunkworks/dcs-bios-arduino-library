@@ -24,7 +24,6 @@ namespace DcsBios {
 			volatile unsigned char sync_byte_count;
 			
 			ExportStreamListener* startESL;
-			NonDcsStreamListener* startNDSL;
 			RingBuffer<64> incomingDataBuffer;
 			volatile bool processingData;
 		public:
