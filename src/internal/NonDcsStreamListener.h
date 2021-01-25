@@ -7,7 +7,7 @@ namespace DcsBios {
 	class NonDcsStreamListener {
 		protected:
 		public:
-			virtual void onDcsBiosWrite(unsigned char value __attribute__((unused))) {}
+			virtual void onDcsBiosWrite(char value __attribute__((unused))) {}
 			NonDcsStreamListener* nextNonDcsStreamListener;
 			
 			static NonDcsStreamListener* firstNonDcsStreamListener;
