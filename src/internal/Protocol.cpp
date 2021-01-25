@@ -42,12 +42,13 @@ namespace DcsBios {
 	void ProtocolParser::processChar(unsigned char c) {
 	  switch(state) {
 		case DCSBIOS_STATE_WAIT_FOR_SYNC:
-			NonDcsStreamListener* ndsl = ExportStreamListener::firstExportStreamListener;
-			while(ndsl) {
-				ndsl->onDcsBiosWrite((char)c);
-				ndsl = ndsl->nextNonDcsStreamListener;
+			{
+				NonDcsStreamListener* ndsl = NonDcsStreamListener::firstNonDcsStreamListener;
+				while(ndsl) {
+					ndsl->onDcsBiosWrite((char)c);
+					ndsl = ndsl->nextNonDcsStreamListener;
+				};
 			}
-
 			break;
 			
 		case DCSBIOS_STATE_ADDRESS_LOW:
@@ -84,8 +85,6 @@ namespace DcsBios {
 			data = (c << 8) | data;
 			count--;
 			
-
-
 			//ExportStreamListener::handleDcsBiosWrite(address, data);
 			// skip all ESLs that cannot possibly be interested in the current address
 			while(startESL && startESL->getLastAddressOfInterest() < address) {
