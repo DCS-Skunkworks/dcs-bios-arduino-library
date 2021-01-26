@@ -19,7 +19,7 @@ namespace DcsBios {
 
 		void resetState()
 		{
-			lastState_ = (lastState_==0)?-1:0;
+			lastState_ = -1;
 		}
 		void pollInput() {
 			char state = digitalRead(pin_);

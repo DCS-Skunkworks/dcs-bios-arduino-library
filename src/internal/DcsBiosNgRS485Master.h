@@ -97,7 +97,7 @@ namespace DcsBios {
 				break;
 		  }
 
-		  if (c == 0x55)
+		  if (c == DCS_SYNC_BYTE)
 			sync_byte_count++;
 		  else
 			sync_byte_count = 0;

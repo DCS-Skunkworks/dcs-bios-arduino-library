@@ -13,6 +13,7 @@ namespace DcsBios {
 		processingData = false;
 		state = DCSBIOS_STATE_WAIT_FOR_SYNC;
 		sync_byte_count = 0;
+		dcs_break_sync_byte_count = 0;
 	}
 
 	/*
@@ -113,7 +114,7 @@ namespace DcsBios {
 			break;
 	  }
 
-	  if (c == 0x55)
+	  if (c == DCS_SYNC_BYTE)
 		sync_byte_count++;
 	  else
 		sync_byte_count = 0;
@@ -123,6 +124,21 @@ namespace DcsBios {
 		sync_byte_count = 0;
 		startESL = ExportStreamListener::firstExportStreamListener;
 	  }
+
+	  if (c == DCS_BREAK_SYNC_BYTE1 && dcs_break_sync_byte_count == 0)
+		dcs_break_sync_byte_count++;
+	  else if (c == DCS_BREAK_SYNC_BYTE2 && dcs_break_sync_byte_count == 1)
+		dcs_break_sync_byte_count++;
+	  else if (c == DCS_BREAK_SYNC_BYTE3 && dcs_break_sync_byte_count == 2)
+		dcs_break_sync_byte_count++;
+	  else if (c == DCS_BREAK_SYNC_BYTE4 && dcs_break_sync_byte_count == 3)
+		dcs_break_sync_byte_count++;
+	  else
+		dcs_break_sync_byte_count = 0;
 	  
+	  if (dcs_break_sync_byte_count == 4) {
+		state = DCSBIOS_STATE_WAIT_FOR_SYNC;
+		dcs_break_sync_byte_count = 0;
+	  }
 	}
 }

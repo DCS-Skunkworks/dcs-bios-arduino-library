@@ -9,6 +9,13 @@
 #define DCSBIOS_STATE_DATA_LOW 5
 #define DCSBIOS_STATE_DATA_HIGH 6
 
+#define DCS_SYNC_BYTE 0x55
+
+#define DCS_BREAK_SYNC_BYTE1 0xA2
+#define DCS_BREAK_SYNC_BYTE2 0x3E
+#define DCS_BREAK_SYNC_BYTE3 0x62
+#define DCS_BREAK_SYNC_BYTE4 0x9B
+
 #include "ExportStreamListener.h"
 #include "NonDcsStreamListener.h"
 #include "RingBuffer.h"
@@ -22,6 +29,7 @@ namespace DcsBios {
 			volatile unsigned int count;
 			volatile unsigned int data;
 			volatile unsigned char sync_byte_count;
+			volatile unsigned char dcs_break_sync_byte_count;
 			
 			ExportStreamListener* startESL;
 			RingBuffer<64> incomingDataBuffer;
