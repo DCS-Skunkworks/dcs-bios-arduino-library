@@ -67,7 +67,7 @@ namespace DcsBios {
 	class RadioPresetT : PollingInput
 	{
 	private:
-		char* msg_;
+		const char* msg_;
 		char pinA_;
 		char pinB_;
 		char pinC_;
@@ -84,6 +84,11 @@ namespace DcsBios {
 			if (digitalRead(pinE_) == LOW) {total+=16;}
 
 			return total;
+		}
+
+		void resetState()
+		{
+			lastState_ = (lastState_==0)?-1:0;
 		}
 
 		void pollInput()
@@ -157,7 +162,7 @@ namespace DcsBios {
 			}
 		}
 	public:
-		RadioPresetT(char* msg, char pinA, char pinB, char pinC, char pinD, char pinE) :
+		RadioPresetT(const char* msg, char pinA, char pinB, char pinC, char pinD, char pinE) :
 			PollingInput(pollIntervalMs)
 		{
 			msg_ = msg;

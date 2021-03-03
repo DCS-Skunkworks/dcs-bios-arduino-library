@@ -1,4 +1,11 @@
+## v0.3.4
+
+- Fix missing methods in PotentiometerInv causing a build error.
+- Similar fixes for RadioPreset.
+- Added OneOfEverything example / testing aid.
+
 ## v0.3.3
+
 - Added ToggleSwitch to allow a single (presumably momentary) button to send alternating values for a single command on rising edges (pushes) of said button.
 
 ## v0.3.2
