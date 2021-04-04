@@ -5,7 +5,7 @@
 
 namespace DcsBios {
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
-	class ActionButtonT : PollingInput {
+	class ActionButtonT : PollingInput, public ResettableInput {
 		private:
 			const char* msg_;
 			const char* arg_;
@@ -41,11 +41,16 @@ namespace DcsBios {
 			{
 				msg_ = msg;
 			}
+        
+		void resetThisState()
+		{
+			this->resetState();
+		}
 	};
 	typedef ActionButtonT<> ActionButton;
 	
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
-	class ToggleButtonT : PollingInput {
+	class ToggleButtonT : PollingInput, public ResettableInput {
 		private:
 			const char* msg_;
 			const char* arg_A;
@@ -87,6 +92,11 @@ namespace DcsBios {
 			{
 				msg_ = msg;
 			}
+        
+		void resetThisState()
+		{
+			this->resetState();
+		}
 	};
 	typedef ToggleButtonT<> ToggleButton;
 
@@ -94,7 +104,7 @@ namespace DcsBios {
   	//This class expects char pointer to a storage variable. It will read the state of that variable instead of a physical pin.
 	//This class is used as a TOGGLE button.
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
-	class MatActionButtonT : PollingInput {
+	class MatActionButtonT : PollingInput, public ResettableInput {
 		private:
 			const char* msg_;
 			const char* arg_;
@@ -123,6 +133,11 @@ namespace DcsBios {
 				address = argAddress;
 				lastState_ = *address;
 			}
+        
+		void resetThisState()
+		{
+			this->resetState();
+		}
 	};
 	typedef MatActionButtonT<> MatActionButton;
 
@@ -130,7 +145,7 @@ namespace DcsBios {
   	//This class expects char pointer to a storage variable. It will read the state of that variable instead of a physical pin.
 	//This class is used as a MOMENTARY button. This button sends a TOGGLE command everytime its state is changed (LOW -> HIGH, HIGH -> LOW, BOTH transistions). As such, its "depressed" state is relative to the position of the control from when the communication to BIOS is initiated, since it only TOGGLES and does not send an absolute position.
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
-	class MatActionButtonToggleT : PollingInput {
+	class MatActionButtonToggleT : PollingInput, public ResettableInput {
 		private:
 			const char* msg_;
 			const char* arg_;
@@ -158,6 +173,11 @@ namespace DcsBios {
 				address = argAddress;
 				lastState_ = *address;
 			}
+        
+		void resetThisState()
+		{
+			this->resetState();
+		}
 	};
 	typedef MatActionButtonToggleT<> MatActionButtonToggle;
 
@@ -165,7 +185,7 @@ namespace DcsBios {
   	//This class expects char pointer to a storage variable. It will read the state of that variable instead of a physical pin.
 	//This class is used as an ABSOLUTE MOMENTARY button. This button sends a total position, which makes its positions unambigous. Which Value constitutes a "TRUE" state is configurable. You can either put in "HIGH" or "LOW", if you want to have a normal button, other possiblities include binding different virtual buttons to the decoded value of an absolute encoder, for example.
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
-	class MatActionButtonSetT : PollingInput {
+	class MatActionButtonSetT : PollingInput, public ResettableInput {
 		private:
 			const char* msg_;
 			char lastState_;
@@ -195,7 +215,12 @@ namespace DcsBios {
 				address = argAddress;
 				onLvl = onLvlArg;
 				lastState_ = *address;
-			}  
+			}
+        
+			void resetThisState()
+			{
+				this->resetState();
+			}
 	};
 	typedef MatActionButtonToggleT<> MatActionButtonToggle;
 }

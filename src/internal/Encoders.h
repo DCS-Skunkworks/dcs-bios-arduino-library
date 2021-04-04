@@ -13,7 +13,7 @@ namespace DcsBios {
 	};
 
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME, StepsPerDetent stepsPerDetent = ONE_STEP_PER_DETENT>
-	class RotaryEncoderT : PollingInput {
+	class RotaryEncoderT : PollingInput, public ResettableInput {
 	private:
 		const char* msg_;
 		const char* decArg_;
@@ -78,11 +78,16 @@ namespace DcsBios {
 		{
 			msg_ = msg;
 		}
+        
+		void resetThisState()
+		{
+			this->resetState();
+		}
 	};
 	typedef RotaryEncoderT<> RotaryEncoder;
 
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME, StepsPerDetent stepsPerDetent = ONE_STEP_PER_DETENT>
-	class RotaryAcceleratedEncoderT : PollingInput {
+	class RotaryAcceleratedEncoderT : PollingInput, public ResettableInput {
     private:
 		const char* msg_;
 		const char* decArg_;
@@ -213,6 +218,11 @@ namespace DcsBios {
 			lastState_ = readState();
 			timeLastDetent_ = millis();
 			cw_momentum_ = 0;
+		}
+        
+		void resetThisState()
+		{
+			this->resetState();
 		}
   };
   typedef RotaryAcceleratedEncoderT<> RotaryAcceleratedEncoder;

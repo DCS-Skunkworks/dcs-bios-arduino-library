@@ -8,7 +8,6 @@ bool tryToSendDcsBiosMessage(const char* msg, const char* args);
 static bool messageSentOrQueued;
 
 namespace DcsBios {
-
 	// TODO: All the optional parameters kinda suck... conisder pulling that template approach from potentiometers?
 	class PollingInput {
 		private:
@@ -71,6 +70,14 @@ namespace DcsBios {
 					pi = pi->nextPollingInput;
 				} while (pi != firstPollingInput); // util we get back to the start
 			}
+	};
+
+	class ResettableInput
+	{
+		public:
+			// Reset the internal "State" of this control only.  Useful if you have controls where you know DCS can fall out of sync.
+			// Call this to force this control to re-send it's state to DCS.			
+			virtual void resetThisState() = 0;
 	};	
 }
 
