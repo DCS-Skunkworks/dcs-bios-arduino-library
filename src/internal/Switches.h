@@ -6,7 +6,7 @@
 
 namespace DcsBios {
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
-	class Switch2PosT : PollingInput
+	class Switch2PosT : PollingInput, public ResettableInput
 	{
 	private:
 		const char* msg_;
@@ -55,11 +55,16 @@ namespace DcsBios {
 		{
 			msg_ = msg;
 		}
+        
+		void resetThisState()
+		{
+			this->resetState();
+		}
 	};
 	typedef Switch2PosT<> Switch2Pos;
 	
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
-	class Switch3PosT : PollingInput
+	class Switch3PosT : PollingInput, public ResettableInput
 	{
 	private:
 		const char* msg_;
@@ -127,11 +132,16 @@ namespace DcsBios {
 		{
 			msg_ = msg;
 		}
+
+		void resetThisState()
+		{
+			this->resetState();
+		}
 	};
 	typedef Switch3PosT<> Switch3Pos;
 
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
-	class SwitchMultiPosT : PollingInput
+	class SwitchMultiPosT : PollingInput, public ResettableInput
 	{
 	private:
 		const char* msg_;
@@ -186,6 +196,11 @@ namespace DcsBios {
 		void SetControl( const char* msg )
 		{
 			msg_ = msg;
+		}
+        
+		void resetThisState()
+		{
+			this->resetState();
 		}
 	};
 	typedef SwitchMultiPosT<> SwitchMultiPos;

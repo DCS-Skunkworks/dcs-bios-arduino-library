@@ -73,7 +73,7 @@ do not come with their own build system, we are just putting everything into the
 		void resetAllStates() {
 			PollingInput::resetAllStates();
 		}
-		
+
 		static void usart_tx(const char* str) {
 			const char* c = str;
 			while (*c) {
