@@ -17,28 +17,15 @@
 /* Instantiate a ProtocolParser object to parse the DCS-BIOS export stream */
 DcsBios::ProtocolParser parser;
 
-unsigned long timerValue = 0xFFFFFFFFu - 156250u;                         // Set the timer value for a 10s interval (CPU_CLK*TIME_IN_SEC)/1024
+unsigned long lastTickMillis;
 
-void setup() {
-  noInterrupts();                       // disable all interrupts during setup
-  TCCR1A = 0;
-  TCCR1B = (1 << CS10)|(1 << CS12);    // 1024 prescaler 
-  
-  TCNT1L = timerValue & 0xFFFF;
-  TCNT1H = timerValue >> 16;
-  TIMSK1 |= (1 << TOIE1);               // enable timer overflow interrupt ISR
-  interrupts();                         // enable all interrupts
-  
+void setup() {  
   DcsBios::setup();
+  lastTickMillis = millis();
 }
 
-void loop() {
-  DcsBios::loop();
-}
 
-DcsBios::Switch3Pos ahcpGunpac("AHCP_GUNPAC", 0, 1);
-
-ISR(TIMER1_OVF_vect)                   
+void timerTick()
 {
   // The timer has expired.  Issue a mass reset to all controls.  Safe, but may generate additional
   // traffic if you have many controls.
@@ -46,11 +33,20 @@ ISR(TIMER1_OVF_vect)
 
   // Alternatively, if you know of one control that is badly affected, you can make a surgical strike for only it's state
   ahcpGunpac.resetThisState();
-  
-  // Restart the timer
-  TCNT1L = timerValue & 0xFFFF;
-  TCNT1H = timerValue >> 16;
 }
+
+void loop() {
+  DcsBios::loop();
+
+  unsigned long now = millis();
+  if(now - lastTickMillis > 10000)
+  {
+    timerTick();
+    lastTickMillis = now;
+  }
+}
+
+DcsBios::Switch3Pos ahcpGunpac("AHCP_GUNPAC", 0, 1);
 
 // This is the recommended approach and the ideal if we can work out all the kinks:
 // If the mission time changes backwards, we have entered a new aircraft; Resync everything
