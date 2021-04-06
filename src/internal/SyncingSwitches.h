@@ -6,7 +6,7 @@
 
 namespace DcsBios {
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
-	class SyncingSwitch3PosT : PollingInput, public ResettableInput
+	class SyncingSwitch3PosT : PollingInput, public ResettableInput, Int16Buffer
 	{
 	private:
 		const char* msg_;
@@ -16,6 +16,9 @@ namespace DcsBios {
 		char steadyState_;
 		unsigned long debounceDelay_;
 		unsigned long lastDebounceTime = 0;
+
+		unsigned int mask;
+		unsigned char shift;
 
 		char readState() {
 			if (digitalRead(pinA_) == LOW) return 0;
@@ -57,8 +60,10 @@ namespace DcsBios {
 			lastState_ = state;
 		}
 	public:
-		SyncingSwitch3PosT(const char* msg, char pinA, char pinB, unsigned long debounceDelay = 50) :
-			PollingInput(pollIntervalMs)
+		SyncingSwitch3PosT(const char* msg, char pinA, char pinB, 
+			unsigned int syncToAddress, unsigned int syncToMask, unsigned char syncToShift,
+			unsigned long debounceDelay = 50) :
+			PollingInput(pollIntervalMs), Int16Buffer(syncToAddress)
 		{
 			msg_ = msg;
 			pinA_ = pinA;
@@ -68,6 +73,9 @@ namespace DcsBios {
 			lastState_ = readState();
 			steadyState_ = lastState_;
 			debounceDelay_ = debounceDelay;
+
+			this->mask = syncToMask;
+			this->shift = syncToShift;
 		}
 		
 		void SetControl( const char* msg )
@@ -78,6 +86,19 @@ namespace DcsBios {
 		void resetThisState()
 		{
 			this->resetState();
+		}
+
+		unsigned int getData() {
+			return ((this->Int16Buffer::getData()) & mask) >> shift;
+		}
+
+		virtual void loop() {
+			if (hasUpdatedData()) {
+				unsigned int dcsData = getData();
+				// What DCS says is most important, so latch it as our last known state.  If the switch differs,
+				// it will be caught on the next pollInput
+				lastState_ = dcsData;
+			}
 		}
 	};
 	typedef SyncingSwitch3PosT<> SyncingSwitch3Pos;
