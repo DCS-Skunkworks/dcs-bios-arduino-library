@@ -121,6 +121,7 @@ do not come with their own build system, we are just putting everything into the
 #include "internal/SyncingSwitches.h"
 #include "internal/Encoders.h"
 #include "internal/Potentiometers.h"
+#include "internal/RotarySyncingPotentiometer.h"
 #include "internal/Leds.h"
 #include "internal/Servos.h"
 #include "internal/Dimmer.h"
