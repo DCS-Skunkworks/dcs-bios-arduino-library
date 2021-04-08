@@ -75,5 +75,5 @@ void onModTimeChange(char* newValue) {
 }
 DcsBios::StringBuffer<5> modTimeBuffer(0x043e, onModTimeChange);
 
-// Yet another option, some controls can be synced to DCS by combining a switch control with a Syncing version of that control.
+// Yes another option, some controls can be synced to DCS by combining a switch control with a Syncing version of that control.
 DcsBios::SyncingSwitch3Pos ahcpMasterArm("AHCP_MASTER_ARM", 2, 3, 0x10e8, 0x000c, 2);
