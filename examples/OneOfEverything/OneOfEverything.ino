@@ -10,7 +10,7 @@ DcsBios::BcdWheel bcdWheelExample("MSG_0", 1, 2);
 DcsBios::ActionButton actionButtonExample("MSG_0", "ARG_0", 1);
 DcsBios::ToggleButton toggleButtonExample("MSG_0", "ARG_0", "ARG_1", 1);
 DcsBios::RotaryEncoder rotaryEncoderExample("MSG_0", "ARG_DEC", "ARG_INC", 1, 2);
-DcsBios::RotaryAcceleratedEncoder rotaryAcceleratedEncoderExample("MSG_0", "ARG_DEC", "ARG_INC", "FAST_INC", "FAST_DEC", 1, 2);
+DcsBios::RotaryAcceleratedEncoder rotaryAcceleratedEncoderExample("MSG_0", "ARG_DEC", "ARG_INC", "FAST_DEC", "FAST_INC", 1, 2);
 DcsBios::Potentiometer potentiometerExample("MSG_0", 1);
 DcsBios::InvertedPotentiometer invertedPotentiometerExample("MSG_0", 1);
 DcsBios::Switch2Pos switch2PosExample("MSG_0", 1);
