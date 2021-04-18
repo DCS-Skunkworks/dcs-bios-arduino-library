@@ -5,6 +5,16 @@
 #include "PollingInput.h"
 
 namespace DcsBios {
+
+	// CW
+	// P1 LHHLLHHLLHHLL
+	// P0 LLHHLLHHLLHHL
+	//    0231023102310
+
+	// CCW
+	// P1 1001100110011
+	// P0 0011001100110
+	//    2013201320132
 	enum StepsPerDetent {
 		ONE_STEP_PER_DETENT = 1,
 		TWO_STEPS_PER_DETENT = 2,
@@ -18,38 +28,32 @@ namespace DcsBios {
 		const char* msg_;
 		const char* decArg_;
 		const char* incArg_;
-		char pinA_;
-		char pinB_;
-		char lastState_;
+		char pinCLK_;
+		char pinDT_;
+		char lastCLK_;
 		signed char delta_;
-		char readState() {
-			return (digitalRead(pinA_) << 1) | digitalRead(pinB_);
-		}
+		
 		void resetState()
 		{
-			lastState_ = (lastState_==0)?-1:0;
+			lastCLK_ = (lastCLK_==0)?-1:0;
 		}
 		void pollInput() {
-			char state = readState();
-			switch(lastState_) {
-				case 0:
-					if (state == 2) delta_--;
-					if (state == 1) delta_++;
-					break;
-				case 1:
-					if (state == 0) delta_--;
-					if (state == 3) delta_++;
-					break;
-				case 2:
-					if (state == 3) delta_--;
-					if (state == 0) delta_++;
-					break;
-				case 3:
-					if (state == 1) delta_--;
-					if (state == 2) delta_++;
-					break;
+			char clk = digitalRead(pinCLK_);
+			
+			if( clk == 1 && lastCLK_ == 0 )
+			{
+				// On a rising edge of the rotaries CLK pin, so sample DT
+				char dt = digitalRead(pinDT_);
+
+				if (dt != clk) {
+					// CCW
+					delta_--;
+				} else {
+					// CW
+					delta_++;
+				}
 			}
-			lastState_ = state;
+			lastCLK_ = clk;
 			
 			if (delta_ >= stepsPerDetent) {
 				if (tryToSendDcsBiosMessage(msg_, incArg_))
@@ -61,17 +65,17 @@ namespace DcsBios {
 			}
 		}
 	public:
-		RotaryEncoderT(const char* msg, const char* decArg, const char* incArg, char pinA, char pinB) :
+		RotaryEncoderT(const char* msg, const char* decArg, const char* incArg, char pinCLK, char pinDT) :
 			PollingInput(pollIntervalMs) {
 			msg_ = msg;
 			decArg_ = decArg;
 			incArg_ = incArg;
-			pinA_ = pinA;
-			pinB_ = pinB;
-			pinMode(pinA_, INPUT_PULLUP);
-			pinMode(pinB_, INPUT_PULLUP);
+			pinCLK_ = pinCLK;
+			pinDT_ = pinDT;
+			pinMode(pinCLK_, INPUT_PULLUP);
+			pinMode(pinDT_, INPUT_PULLUP);
 			delta_ = 0;
-			lastState_ = readState();
+			lastCLK_ = digitalRead(pinCLK_);
 		}
 
 		void SetControl( const char* msg )
@@ -89,9 +93,9 @@ namespace DcsBios {
 		const char* incArg_;
 		const char* fastDecArg_;
 		const char* fastIncArg_;
-		char pinA_;
-		char pinB_;
-		char lastState_;
+		char pinCLK_;
+		char pinDT_;
+		char lastCLK_;
 		signed char delta_;
 		char cw_momentum_;
 
@@ -101,38 +105,30 @@ namespace DcsBios {
 
 		unsigned long timeLastDetent_;
 		
-		char readState() {
-			return (digitalRead(pinA_) << 1) | digitalRead(pinB_);
-		}
-		
 		void resetState()
 		{
-			lastState_ = (lastState_==0)?-1:0;
+			lastCLK_ = (lastCLK_==0)?-1:0;
 		}
 
 		void pollInput()
 		{
-			char state = readState();
-			char dir=0;
-			switch(lastState_) {
-				case 0:
-					if (state == 2) dir=-1;
-					if (state == 1) dir=+1;
-				break;
-				case 1:
-					if (state == 0) dir=-1;
-					if (state == 3) dir=+1;
-				break;
-				case 2:
-					if (state == 3) dir=-1;
-					if (state == 0) dir=+1;
-				break;
-				case 3:
-					if (state == 1) dir=-1;
-					if (state == 2) dir=+1;
-				break;
+			char clk = digitalRead(pinCLK_);
+			char dir = 0;
+			
+			if( clk == 1 && lastCLK_ == 0 )
+			{
+				// On a rising edge of the rotaries CLK pin, so sample DT
+				char dt = digitalRead(pinDT_);
+
+				if (dt != clk) {
+					// CCW
+					dir = -1;
+				} else {
+					// CW
+					dir = 1;
+				}
 			}
-			lastState_ = state;
+			lastCLK_ = clk;
 
 			if( dir > 0 )
 			{
@@ -197,7 +193,7 @@ namespace DcsBios {
 			}
 		}
 	public:
-		RotaryAcceleratedEncoderT(const char* msg, const char* decArg, const char* incArg, const char* fastDecArg, const char* fastIncArg, char pinA, char pinB) :
+		RotaryAcceleratedEncoderT(const char* msg, const char* decArg, const char* incArg, const char* fastDecArg, const char* fastIncArg, char pinCLK, char pinDT) :
 				PollingInput(pollIntervalMs)
 		{
 			msg_ = msg;
@@ -205,12 +201,12 @@ namespace DcsBios {
 			incArg_ = incArg;
 			fastDecArg_ = fastDecArg;
 			fastIncArg_ = fastIncArg;
-			pinA_ = pinA;
-			pinB_ = pinB;
-			pinMode(pinA_, INPUT_PULLUP);
-			pinMode(pinB_, INPUT_PULLUP);
+			pinCLK_ = pinCLK;
+			pinDT_ = pinDT;
+			pinMode(pinCLK_, INPUT_PULLUP);
+			pinMode(pinDT_, INPUT_PULLUP);
 			delta_ = 0;
-			lastState_ = readState();
+			lastCLK_ = digitalRead(pinCLK_);
 			timeLastDetent_ = millis();
 			cw_momentum_ = 0;
 		}
