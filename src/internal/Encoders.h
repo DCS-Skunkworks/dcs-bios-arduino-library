@@ -30,28 +30,55 @@ namespace DcsBios {
 		const char* incArg_;
 		char pinCLK_;
 		char pinDT_;
-		char lastCLK_;
+		
+		uint8_t lrmem = 3;
+		int lrsum = 0;
+		int num = 0;
+
+		int8_t read_rotary()
+		{
+			static int8_t TRANS[] = {0,-1,1,14,1,0,14,-1,-1,14,0,1,14,1,-1,0};
+			int8_t l, r;
+
+			l = digitalRead(pinCLK_);
+			r = digitalRead(pinDT_);
+
+			lrmem = ((lrmem & 0x03) << 2) + 2*l + r;
+			lrsum = lrsum + TRANS[lrmem];
+			/* encoder not in the neutral state */
+			if(lrsum % 4 != 0) return(0);
+			/* encoder in the neutral state */
+			if (lrsum == 4)
+				{
+				lrsum=0;
+				return(1);
+				}
+			if (lrsum == -4)
+				{
+				lrsum=0;
+				return(-1);
+				}
+			/* lrsum > 0 if the impossible transition */
+			lrsum=0;
+			return(0);
+		}
+
 		signed char delta_;
 		
 		void resetState()
 		{
-			lastCLK_ = (lastCLK_==0)?-1:0;
+			lrmem = 3;
+			lrsum = 0;
+			num = 0;
 		}
 		void pollInput() {
-			char clk = digitalRead(pinCLK_);
-			
-			if( clk == 1 && lastCLK_ == 0 )
-			{
-				// On a rising edge of the rotaries CLK pin, so sample DT
-				char dt = digitalRead(pinDT_);
+			// To combat rotary singal noise, the internals are (heavily) inspired by this post: https://www.pinteric.com/rotary.html
 
-				if (dt != clk) {
-					// CCW
-					delta_--;
-				} else {
-					// CW
-					delta_++;
-				}
+			int8_t res;
+   			res = read_rotary();
+
+			if( res != 0 ) {
+				delta_ += res;
 				
 				if (delta_ >= stepsPerDetent) {
 					if (tryToSendDcsBiosMessage(msg_, incArg_))
@@ -62,8 +89,8 @@ namespace DcsBios {
 						delta_ = 0;
 				}
 			}
-			lastCLK_ = clk;
 		}
+
 	public:
 		RotaryEncoderT(const char* msg, const char* decArg, const char* incArg, char pinCLK, char pinDT) :
 			PollingInput(pollIntervalMs) {
@@ -75,7 +102,6 @@ namespace DcsBios {
 			pinMode(pinCLK_, INPUT_PULLUP);
 			pinMode(pinDT_, INPUT_PULLUP);
 			delta_ = 0;
-			lastCLK_ = digitalRead(pinCLK_);
 		}
 
 		void SetControl( const char* msg )
