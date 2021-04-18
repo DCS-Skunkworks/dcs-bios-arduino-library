@@ -52,17 +52,17 @@ namespace DcsBios {
 					// CW
 					delta_++;
 				}
+				
+				if (delta_ >= stepsPerDetent) {
+					if (tryToSendDcsBiosMessage(msg_, incArg_))
+						delta_ = 0;
+				}
+				else if (delta_ <= -stepsPerDetent) {
+					if (tryToSendDcsBiosMessage(msg_, decArg_))
+						delta_ = 0;
+				}
 			}
 			lastCLK_ = clk;
-			
-			if (delta_ >= stepsPerDetent) {
-				if (tryToSendDcsBiosMessage(msg_, incArg_))
-					delta_ -= stepsPerDetent;
-			}
-			if (delta_ <= -stepsPerDetent) {
-				if (tryToSendDcsBiosMessage(msg_, decArg_))
-					delta_ += stepsPerDetent;
-			}
 		}
 	public:
 		RotaryEncoderT(const char* msg, const char* decArg, const char* incArg, char pinCLK, char pinDT) :
