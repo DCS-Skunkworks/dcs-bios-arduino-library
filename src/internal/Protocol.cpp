@@ -76,8 +76,6 @@ namespace DcsBios {
 		case DCSBIOS_STATE_DATA_HIGH:
 			data = (c << 8) | data;
 			count--;
-			
-
 
 			//ExportStreamListener::handleDcsBiosWrite(address, data);
 			// skip all ESLs that cannot possibly be interested in the current address
@@ -97,7 +95,6 @@ namespace DcsBios {
 					el = el->nextExportStreamListener;
 				}
 			}
-
 			
 			address += 2;
 			if (count == 0)
