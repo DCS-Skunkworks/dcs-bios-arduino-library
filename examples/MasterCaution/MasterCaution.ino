@@ -1,7 +1,7 @@
 /* use '#define DCSBIOS_DEFAULT_SERIAL' instead if your Arduino board
  *  does not feature an ATMega328 or ATMega2650 controller.
  */
-#define DCSBIOS_IRQ_SERIAL
+#define DCSBIOS_DEFAULT_SERIAL
 #include "DcsBios.h"
 
 /* Declare a Master Caution Reset button on pin 10 */
@@ -16,4 +16,3 @@ void setup() {
 void loop() {
   DcsBios::loop();
 }
-
