@@ -115,8 +115,8 @@ namespace DcsBios {
 	template < unsigned int LENGTH >
 	class StringBuffer : public ExportStreamListener {
 		private:
-			char receivingBuffer[LENGTH+1];
-			char userBuffer[LENGTH+1];
+			unsigned char receivingBuffer[LENGTH+1];
+			unsigned char userBuffer[LENGTH+1];
 			volatile bool receivingDirty;
 			bool userDirty;
 			void (*callback)(char*);
@@ -139,10 +139,10 @@ namespace DcsBios {
 			}
 			virtual void onDcsBiosWrite(unsigned int address, unsigned int data) {
 				unsigned int index = address - firstAddressOfInterest;
-				setChar(index, ((char*)&data)[0] );
+				setChar(index, ((unsigned char*)&data)[0] );
 				index++;
 				if (LENGTH > index) {
-					setChar(index, ((char*)&data)[1] );
+					setChar(index, ((unsigned char*)&data)[1] );
 				}
 			}
 			virtual void onConsistentData() {
@@ -157,14 +157,14 @@ namespace DcsBios {
 			bool hasUpdatedData() {
 				return userDirty;
 			}
-			char* getData() {
+			unsigned char* getData() {
 				userDirty = false;
 				return userBuffer;
 			}
 			virtual void loop() {
 				if (hasUpdatedData()) {
 					if (callback) {
-						callback(getData());
+						callback((char *)getData());
 					}
 				}
 			}

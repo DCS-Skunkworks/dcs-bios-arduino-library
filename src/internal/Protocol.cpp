@@ -74,7 +74,7 @@ namespace DcsBios {
 			break;
 			
 		case DCSBIOS_STATE_DATA_HIGH:
-			data = (c << 8) | data;
+			data = ((unsigned int)c << 8) | data;
 			count--;
 
 			//ExportStreamListener::handleDcsBiosWrite(address, data);
