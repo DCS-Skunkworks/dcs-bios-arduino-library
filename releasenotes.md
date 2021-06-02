@@ -6,7 +6,7 @@
 
 ## v0.3.3
 
-- Added ToggleSwitch to allow a single (presumably momentary) button to send alternating values for a single command on rising edges (pushes) of said button.
+- Added ToggleButton to allow a single (presumably momentary) button to send alternating values for a single command on rising edges (pushes) of said button.
 
 ## v0.3.2
 - Added new feature for SwitchMultiPos, allowing a "default" state to be specified for controls that can have a default state.  For example, A-10 Emergency Trim without a center detent
