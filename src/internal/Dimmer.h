@@ -11,13 +11,18 @@ namespace DcsBios {
 			void onDcsBiosFrameSync();
 			char pin_;
 			const char* msg_;
+			int minOutput_;
+			int maxOutput_;
 		public:
-			Dimmer(unsigned int address, char pin) : Int16Buffer(address){
+			Dimmer(unsigned int address, char pin, int minOutput=0, int maxOutput=255) : Int16Buffer(address){
 				pin_ = pin;
+				minOutput_ = minOutput;
+				maxOutput_ = maxOutput;
 			}
 			virtual void loop() {
 				if (hasUpdatedData()) {
-				analogWrite(pin_, getData()/255);
+				analogWrite(pin_, 
+					map(getData(), 0, 65535, minOutput_, maxOutput_));
 				} 
 			}
 			
