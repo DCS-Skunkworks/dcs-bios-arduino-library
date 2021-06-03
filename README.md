@@ -12,3 +12,8 @@ DCS-BIOS was originally developed here, [DCS-BIOS project.](https://github.com/d
 
 This is a community maintained plugin.  Support is best found at the DCS-Flightpanels discord channel.
 
+## Releasing
+
+1. Bump version number in library.properties
+2. Run make_release, providing the same version number when prompted.
+3. Manually make a zip file of the folder created in /Releases, and upload to github.
