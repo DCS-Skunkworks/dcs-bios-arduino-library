@@ -1,19 +1,11 @@
 #ifndef __DCSBIOS_SERVOS_H
 #define __DCSBIOS_SERVOS_H
 
-#ifdef Servo_h
-
 #include "Arduino.h"
 #include "ExportStreamListener.h"
 #include <Servo.h>
 
-
-
-
 namespace DcsBios {
-	
-
-	
 	class ServoOutput : public Int16Buffer {
 		private:
 			void onDcsBiosFrameSync();
@@ -57,7 +49,5 @@ namespace DcsBios {
 			}
 	};
 }
-
-#endif
 
 #endif
