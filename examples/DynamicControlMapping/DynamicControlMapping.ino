@@ -4,7 +4,7 @@
 //
 //
 
-#define DCSBIOS_IRQ_SERIAL
+#define DCSBIOS_DEFAULT_SERIAL
 #include "DcsBios.h"
 
 bool g_bRun = true;    //main loop control

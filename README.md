@@ -2,7 +2,7 @@
 
 This is an Arduino library that makes it easy to write sketches that talk to DCS-BIOS.
 
-For more information and documentation, see the [DCS-BIOS FlightPanels Project](https://github.com/DCSFlightpanels).
+For more information and documentation, see the [DCS-BIOS FlightPanels Project](https://github.com/DCSFlightpanels).  The example "OneOfEverything" is a good place to start looking for controls to use.
 
 ## Origins
 
@@ -12,3 +12,8 @@ DCS-BIOS was originally developed here, [DCS-BIOS project.](https://github.com/d
 
 This is a community maintained plugin.  Support is best found at the DCS-Flightpanels discord channel.  The wiki is very much a work in progress, and can be found here: https://github.com/talbotmcinnis/dcs-bios-arduino-library/wiki
 
+## Releasing
+
+1. Bump version number in library.properties
+2. Run make_release, providing the same version number when prompted.
+3. Manually make a zip file of the folder created in /Releases, and upload to github.
