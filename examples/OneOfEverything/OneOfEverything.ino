@@ -18,6 +18,14 @@ DcsBios::Switch3Pos switch3PosExample("MSG_0", 1, 2);
 const byte multiPosPins[4] = {1,2,3,4};
 DcsBios::SwitchMultiPos switchMulitPosExample("MSG_0", multiPosPins, 4);
 
+DcsBios::Dimmer defaultDimmerExample(0x1012, 5);
+DcsBios::Dimmer invertedDimmerExample(0x1012, 5, 200,0);
+unsigned int myValueMapper(unsigned int dcsValue)
+{
+  return dcsValue % 10;
+}
+DcsBios::Dimmer mappedDimmerExample(0x1012, 5, myValueMapper);
+
 DcsBios::LED masterCaution(0x1012, 0x0800, 13);
 
 void setup() {
