@@ -1,3 +1,11 @@
+## v0.3.5
+- Switched all examples to DCSBIOS_DEFAULTSERIAL for compatibility
+- Updated some of the internal documentation
+- Added details and more controls to OneOfEverything example.
+- Fixed errors with Matrix enabled buttons.
+- Added additional options to Dimmer class for a range map or complete custom mapping function.
+- Removed conditional requirement in servo.h.  There is some risk this may not build on some hardware, so please open an issue asap if you find errors regarding Servos.h
+
 ## v0.3.4
 
 - Fix missing methods in PotentiometerInv causing a build error.
