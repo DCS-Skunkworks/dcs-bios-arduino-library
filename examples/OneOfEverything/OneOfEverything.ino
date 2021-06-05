@@ -53,7 +53,7 @@ DcsBios::InvertedPotentiometer invertedPotentiometerExample("MSG_0", 1);
 DcsBios::Dimmer defaultDimmerExample(0x1012, 5);
 DcsBios::LED masterCaution(0x1012, 0x0800, 13);
 // An analog output with a value that comes from a DCS address
-DcsBios::Dimmer(0x1012, 13);
+DcsBios::Dimmer dimmerExample(0x1012, 13);
 DcsBios::Dimmer invertedDimmerExample(0x1012, 5, 200,0);
 unsigned int myValueMapper(unsigned int dcsValue)
 {
@@ -61,7 +61,7 @@ unsigned int myValueMapper(unsigned int dcsValue)
 }
 DcsBios::Dimmer mappedDimmerExample(0x1012, 5, myValueMapper);
 // A servo motor controlleed from DCS, i.e. a guage.
-DcsBios::ServoOutput(0x1012, 13, 544, 2400);
+DcsBios::ServoOutput servoExample(0x1012, 13, 544, 2400);
 
 void setup() {
   DcsBios::setup();
