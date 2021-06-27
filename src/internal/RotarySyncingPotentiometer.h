@@ -6,8 +6,9 @@
 #include "PollingInput.h"
 
 namespace DcsBios {
+	int debugSyncVal = 0;
 
-	template <unsigned long pollIntervalMs = POLL_EVERY_TIME, unsigned int hysteresis = 128, unsigned int ewma_divisor = 5, bool invert = false>
+	template <unsigned long pollIntervalMs = POLL_EVERY_TIME, bool invert = false>
 	class RotarySyncingPotentiometerEWMA : PollingInput, Int16Buffer, public ResettableInput {
 		private:
 			void resetState()
@@ -15,20 +16,7 @@ namespace DcsBios {
 				lastState_ = (lastState_==0)?-1:0;
 			}
 			void pollInput() {
-				unsigned int state = readState();
-				accumulator += ((float)state - accumulator) / (float)ewma_divisor;
-				state = (unsigned int)accumulator;
-				
-				if (((lastState_ > state && (lastState_ - state > hysteresis)))
-				|| ((state > lastState_) && (state - lastState_ > hysteresis))
-				|| ((state > (65535 - hysteresis) && state > lastState_))
-				|| ((state < hysteresis && state < lastState_))
-				) {
-					char buf[6];
-					utoa(state, buf, 10);
-					if (tryToSendDcsBiosMessage(msg_, buf))
-						lastState_ = state;
-				}
+				lastState_ = readState();
 			}
 
 			inline unsigned int readState()
@@ -39,7 +27,6 @@ namespace DcsBios {
 			const char* msg_;
 			char pin_;
 			unsigned int lastState_;
-			float accumulator;
 
 			unsigned int mask;
 			unsigned char shift;
@@ -68,14 +55,19 @@ namespace DcsBios {
 			}
 
 			unsigned int getData() {
+				//return debugSyncVal;
 				return ((this->Int16Buffer::getData()) & mask) >> shift;
 			}
 			// Reminder: If this doesn't work, I think I want to make a new SyncControls(IControl, IBuffer, converterCallback) which would be more flexible, but need everything to fit IControl or IBuffer... better
 			virtual void loop() {
-				if (hasUpdatedData()) {
+				// If this syncs at all, I think I'll still need something to slow it down
+				//if (hasUpdatedData())
+				 {
 					unsigned int dcsData = getData();
-					int deltaDcsToPit = MapValue(dcsData - lastState_);
-					
+					//Serial.write("SyncDCS:");erial.print(dcsData);
+					int deltaDcsToPit = MapValue(lastState_ - dcsData);
+					//Serial.write("ToPhys:");Serial.print(lastState_);
+					//Serial.write("Delta:");Serial.print(deltaDcsToPit);
 					if( deltaDcsToPit >= 10000)
 						deltaDcsToPit = 9999;
 					else if( deltaDcsToPit <= -10000)
@@ -100,7 +92,7 @@ namespace DcsBios {
 			}
 	};
 	typedef RotarySyncingPotentiometerEWMA<> RotarySyncingPotentiometer;
-	typedef RotarySyncingPotentiometerEWMA<POLL_EVERY_TIME, 128, 5, true> InvertedRotarySyncingPotentiometer;
+	typedef RotarySyncingPotentiometerEWMA<POLL_EVERY_TIME, true> InvertedRotarySyncingPotentiometer;
 }
 
 #endif
