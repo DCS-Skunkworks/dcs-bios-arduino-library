@@ -45,7 +45,7 @@ DcsBios::RotaryAcceleratedEncoder rotaryAcceleratedEncoderExample("MSG_0", "ARG_
 // A linear/analog axis on a single pin
 DcsBios::Potentiometer potentiometerExample("MSG_0", 1);
 // An inverted version of a linear axis control
-DcsBios::InvertedPotentiometer invertedPotentiometerExample("MSG_0", 1);
+DcsBios::Potentiometer invertedPotentiometerExample("MSG_0", 1, true);
 
 // Outputs
 ///////////
@@ -54,7 +54,7 @@ DcsBios::Dimmer defaultDimmerExample(0x1012, 5);
 DcsBios::LED masterCaution(0x1012, 0x0800, 13);
 // An analog output with a value that comes from a DCS address
 DcsBios::Dimmer dimmerExample(0x1012, 13);
-DcsBios::Dimmer invertedDimmerExample(0x1012, 5, 200,0);
+DcsBios::Dimmer invertedDimmerExample(0x1012, 5, 200, 0);
 unsigned int myValueMapper(unsigned int dcsValue)
 {
   return dcsValue % 10;
