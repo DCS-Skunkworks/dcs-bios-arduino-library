@@ -1,6 +1,9 @@
+## v0.3.6 (VNext)
+- Replaced InvertedPotentiometer class with a reverse bool constructor option for the existing potentiometer.
+
 ## v0.3.5
-- Switched all examples to DCSBIOS_DEFAULTSERIAL for compatibility
-- Updated some of the internal documentation
+- Switched all examples to DCSBIOS_DEFAULTSERIAL for compatibility.
+- Updated some of the internal documentation.
 - Added details and more controls to OneOfEverything example.
 - Fixed errors with Matrix enabled buttons.
 - Added additional options to Dimmer class for a range map or complete custom mapping function.
