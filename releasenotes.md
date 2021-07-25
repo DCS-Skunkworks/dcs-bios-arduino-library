@@ -1,5 +1,7 @@
 ## v0.3.6 (VNext)
 - Replaced InvertedPotentiometer class with a reverse bool constructor option for the existing potentiometer.
+- Added Synchronization example to layout different strategies for physical control <=> DCS synchronization on startup, periodic or on aircraft entry.
+  - Created new synchronization option via ResettableInput/resetThisState()
 
 ## v0.3.5
 - Switched all examples to DCSBIOS_DEFAULTSERIAL for compatibility.
