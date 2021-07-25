@@ -7,7 +7,7 @@
 
 namespace DcsBios {
 
-	template <unsigned long pollIntervalMs = POLL_EVERY_TIME, unsigned int hysteresis = 128, unsigned int ewma_divisor = 5, bool invert = false>
+	template <unsigned long pollIntervalMs = POLL_EVERY_TIME, unsigned int hysteresis = 128, unsigned int ewma_divisor = 5>
 	class PotentiometerEWMA : PollingInput, public ResettableInput {
 		private:
 			void resetState()
@@ -33,11 +33,6 @@ namespace DcsBios {
 					if (tryToSendDcsBiosMessage(msg_, buf))
 						lastState_ = state;
 				}
-			}
-
-			inline unsigned int readState()
-			{
-				return map(analogRead(pin_), invert?1023:0, invert?0:1023, 0, 65535);
 			}
 
 			const char* msg_;
@@ -70,7 +65,6 @@ namespace DcsBios {
 			}
 	};
 	typedef PotentiometerEWMA<> Potentiometer;
-	typedef PotentiometerEWMA<POLL_EVERY_TIME, 128, 5, true> InvertedPotentiometer;
 }
 
 #endif
