@@ -55,39 +55,41 @@ namespace DcsBios {
 			}
 
 			unsigned int getData() {
-				//return debugSyncVal;
 				return ((this->Int16Buffer::getData()) & mask) >> shift;
 			}
-			// Reminder: If this doesn't work, I think I want to make a new SyncControls(IControl, IBuffer, converterCallback) which would be more flexible, but need everything to fit IControl or IBuffer... better
+
+			// Reminder: If this works, consider making it more general.  Either a control that implement IBuffer but takes a new IControl interface and a callback.  Or heck if I go that far, I'm back to simply making it a callback though right?
 			virtual void loop() {
 				// If this syncs at all, I think I'll still need something to slow it down
 				//if (hasUpdatedData())
 				 {
 					unsigned int dcsData = getData();
-					//Serial.write("SyncDCS:");erial.print(dcsData);
+					//Serial.write("SyncDCS:");Serial.print(dcsData);
 					int deltaDcsToPit = MapValue(lastState_ - dcsData);
 					//Serial.write("ToPhys:");Serial.print(lastState_);
 					//Serial.write("Delta:");Serial.print(deltaDcsToPit);
-					if( deltaDcsToPit >= 10000)
-						deltaDcsToPit = 9999;
-					else if( deltaDcsToPit <= -10000)
-						deltaDcsToPit = -9999;
-
-					char buff[5];
-					itoa(deltaDcsToPit, buff, 10);
-					sprintf(buff, "%+d", deltaDcsToPit);
-
-					tryToSendDcsBiosMessage(msg_, buff);
+					
+					// Send the adjustment to DCS
+					// char buff[5];
+					// itoa(deltaDcsToPit, buff, 10);
+					// sprintf(buff, "%+d", deltaDcsToPit);
+					// tryToSendDcsBiosMessage(msg_, buff);
 				}
 			}
 
 			// This will be a callback ingested later, but for now
 			int MapValue(unsigned int controlPosition)
 			{
-				// Initial testing here is for hornet min height, with the output being a 
+				// Initial testing here is for hornet min height, with the input being a 
 				// +/- 3200 rotary and the output being in the range 0-65535, so I'm GUESSING
 				// I need a big k value.  Tune this later
 				unsigned int result = 50 * controlPosition;
+
+				if( deltaDcsToPit >= 10000)
+					result = 9999;
+				else if( deltaDcsToPit <= -10000)
+					result = -9999;
+
 				return result;
 			}
 	};
