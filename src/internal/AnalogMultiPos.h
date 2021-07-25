@@ -6,7 +6,7 @@
 namespace DcsBios {
 
     template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
-    class AnalogMultiPosT : PollingInput
+    class AnalogMultiPosT : PollingInput, public ResettableInput
     {
     private:
         const char *msg_;
@@ -58,6 +58,11 @@ namespace DcsBios {
         {
             msg_ = msg;
         }
+        
+		void resetThisState()
+		{
+			this->resetState();
+		}
     };
 
     typedef AnalogMultiPosT<> AnalogMultiPos;

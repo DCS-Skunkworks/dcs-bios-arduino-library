@@ -5,7 +5,7 @@
 
 namespace DcsBios {
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
-	class BcdWheelT : PollingInput
+	class BcdWheelT : PollingInput, public ResettableInput
 	{
 	private:
 		const char* msg_;
@@ -60,11 +60,16 @@ namespace DcsBios {
 				pinMode(pinD_, INPUT_PULLUP);
 			lastState_ = readState();
 		}
+        
+		void resetThisState()
+		{
+			this->resetState();
+		}
 	};
 	typedef BcdWheelT<> BcdWheel;
 
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
-	class RadioPresetT : PollingInput
+	class RadioPresetT : PollingInput, public ResettableInput
 	{
 	private:
 		const char* msg_;
@@ -177,6 +182,11 @@ namespace DcsBios {
 			pinMode(pinD_, INPUT_PULLUP);
 			pinMode(pinE_, INPUT_PULLUP);
 			lastState_ = readState();
+		}
+        
+		void resetThisState()
+		{
+			this->resetState();
 		}
 	};
 	typedef RadioPresetT<> RadioPreset;
