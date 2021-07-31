@@ -59,14 +59,16 @@ namespace DcsBios {
 			}
 
 			// Reminder: If this works, consider making it more general.  Either a control that implement IBuffer but takes a new IControl interface and a callback.  Or heck if I go that far, I'm back to simply making it a callback though right?
-			virtual void loop() {
+			void loop() {
 				// If this syncs at all, I think I'll still need something to slow it down
 				//if (hasUpdatedData())
 				 {
-					unsigned int dcsData = getData();
+					Serial.write("Physical:");Serial.println(lastState_);
+
+					//unsigned int dcsData = getData();
 					//Serial.write("SyncDCS:");Serial.print(dcsData);
-					int deltaDcsToPit = MapValue(lastState_ - dcsData);
-					//Serial.write("ToPhys:");Serial.print(lastState_);
+					//int deltaDcsToPit = MapValue(lastState_ - dcsData);
+					
 					//Serial.write("Delta:");Serial.print(deltaDcsToPit);
 					
 					// Send the adjustment to DCS
@@ -85,9 +87,9 @@ namespace DcsBios {
 				// I need a big k value.  Tune this later
 				unsigned int result = 50 * controlPosition;
 
-				if( deltaDcsToPit >= 10000)
+				if( result >= 10000)
 					result = 9999;
-				else if( deltaDcsToPit <= -10000)
+				else if( result <= -10000)
 					result = -9999;
 
 				return result;
