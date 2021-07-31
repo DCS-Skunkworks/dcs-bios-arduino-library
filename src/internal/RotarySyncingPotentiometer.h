@@ -64,7 +64,7 @@ namespace DcsBios {
 			// Reminder: If this works, consider making it more general.  Either a control that implement IBuffer but takes a new IControl interface and a callback.  Or heck if I go that far, I'm back to simply making it a callback though right?
 			virtual void loop() {
 				// If this syncs at all, I think I'll still need something to slow it down
-				if (hasUpdatedData())
+				//if (hasUpdatedData())
 				 {
 					//Serial.write("Physical:");Serial.println(lastState_);
 					unsigned int dcsData = getData();
