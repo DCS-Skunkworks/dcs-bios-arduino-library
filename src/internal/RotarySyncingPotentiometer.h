@@ -73,9 +73,10 @@ namespace DcsBios {
 					//Serial.write("SyncDCS:");Serial.println(dcsData);
 					int requiredAdjustment = MapValue(lastState_, dcsData);
 					
-					//Serial.write("lastState_:");Serial.println(lastState_);
-					//Serial.write("dcsData:");Serial.println(dcsData);
-					//Serial.write("requiredAdjustment:");Serial.println(requiredAdjustment);
+					Serial.println("**************");
+					Serial.write("lastState_:");Serial.println(lastState_);
+					Serial.write("dcsData:");Serial.println(dcsData);
+					Serial.write("requiredAdjustment:");Serial.println(requiredAdjustment);
 					
 					// Send the adjustment to DCS
 					if( requiredAdjustment != 0 )
