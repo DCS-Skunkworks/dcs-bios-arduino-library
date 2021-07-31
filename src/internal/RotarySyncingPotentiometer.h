@@ -63,34 +63,48 @@ namespace DcsBios {
 				// If this syncs at all, I think I'll still need something to slow it down
 				//if (hasUpdatedData())
 				 {
-					Serial.write("Physical:");Serial.println(lastState_);
+					//Serial.write("Physical:");Serial.println(lastState_);
 
-					//unsigned int dcsData = getData();
-					//Serial.write("SyncDCS:");Serial.print(dcsData);
-					//int deltaDcsToPit = MapValue(lastState_ - dcsData);
+					unsigned int dcsData = getData();
+					//Serial.write("SyncDCS:");Serial.println(dcsData);
+					int requiredAdjustment = MapValue(lastState_, dcsData);
 					
 					//Serial.write("Delta:");Serial.print(deltaDcsToPit);
 					
 					// Send the adjustment to DCS
-					// char buff[5];
-					// itoa(deltaDcsToPit, buff, 10);
-					// sprintf(buff, "%+d", deltaDcsToPit);
-					// tryToSendDcsBiosMessage(msg_, buff);
+					if( requiredAdjustment != 0 )
+					{
+						char buff[5];
+						//itoa(requiredAdjustment, buff, 10);
+						sprintf(buff, "%+d", requiredAdjustment);
+						tryToSendDcsBiosMessage(msg_, buff);
+					}
 				}
 			}
 
 			// This will be a callback ingested later, but for now
-			int MapValue(unsigned int controlPosition)
+			int MapValue(unsigned int physicalPosition, unsigned int dcsPosition)
 			{
 				// Initial testing here is for hornet min height, with the input being a 
 				// +/- 3200 rotary and the output being in the range 0-65535, so I'm GUESSING
-				// I need a big k value.  Tune this later
-				unsigned int result = 50 * controlPosition;
+				// I need a big k value.  Tune this later.
+
+				// For the pilot project: Potentiometer lastState range is 0 to 65535.
+				// dcs data is 0 to 64355
+
+				int deltaDcsToPit = (int)physicalPosition - (int)map(dcsPosition,0,64355,0,65535);
+				int result = 1 * deltaDcsToPit;
 
 				if( result >= 10000)
 					result = 9999;
 				else if( result <= -10000)
 					result = -9999;
+
+				// Minimum adjustment
+				if( result > 0 && result < 3200 )
+					return 0;
+				if( result < 0 && result > -3200 )
+					return 0;
 
 				return result;
 			}
