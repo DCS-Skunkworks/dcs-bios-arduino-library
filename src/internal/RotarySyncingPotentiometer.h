@@ -70,7 +70,7 @@ namespace DcsBios {
 					unsigned int dcsData = getData();
 
 					// Fake data to test my alignment maths
-					//lastState_ = 0;
+					lastState_ = 16384;
 					//dcsData = 32768;
 
 					//Serial.write("SyncDCS:");Serial.println(dcsData);
