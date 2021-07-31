@@ -67,24 +67,23 @@ namespace DcsBios {
 					unsigned int dcsData = getData();
 
 					// Fake data to test my alignment maths
-					lastState = 0;
-					dcsData = 32768;
+					//lastState_ = 0;
+					//dcsData = 32768;
 
 					//Serial.write("SyncDCS:");Serial.println(dcsData);
 					int requiredAdjustment = MapValue(lastState_, dcsData);
 					
-					Serial.write("lastState_:");Serial.println(lastState_);
-					Serial.write("dcsData:");Serial.println(dcsData);
-					Serial.write("requiredAdjustment:");Serial.println(requiredAdjustment);
+					//Serial.write("lastState_:");Serial.println(lastState_);
+					//Serial.write("dcsData:");Serial.println(dcsData);
+					//Serial.write("requiredAdjustment:");Serial.println(requiredAdjustment);
 					
 					// Send the adjustment to DCS
-					// if( requiredAdjustment != 0 )
-					// {
-					// 	char buff[5];
-					// 	//itoa(requiredAdjustment, buff, 10);
-					// 	sprintf(buff, "%+d", requiredAdjustment);
-					// 	tryToSendDcsBiosMessage(msg_, buff);
-					// }
+					if( requiredAdjustment != 0 )
+					{
+						char buff[6];
+						sprintf(buff, "%+d", requiredAdjustment);
+						tryToSendDcsBiosMessage(msg_, buff);
+					}
 				}
 			}
 
@@ -98,19 +97,16 @@ namespace DcsBios {
 				// For the pilot project: Potentiometer lastState range is 0 to 65535.
 				// dcs data is 0 to 64355
 
-				int deltaDcsToPit = (int)physicalPosition - (int)map(dcsPosition,0,64355,0,65535);
-				int result = 1 * deltaDcsToPit;
+				int deltaPitToDcs = (int)physicalPosition - (int)map(dcsPosition,0,64355,0,65535);
+				int result = 1 * deltaPitToDcs;
 
-				if( result >= 10000)
-					result = 9999;
-				else if( result <= -10000)
-					result = -9999;
+				// Limit the range of adjustment
+				if( result > 9600)
+					result = 9600;
+				else if( result < -9600)
+					result = -9600;
 
-				// Minimum adjustment
-				if( result > 0 && result < 3200 )
-					return 0;
-				if( result < 0 && result > -3200 )
-					return 0;
+				result = (result/3200)*3200;	// Snap to a multiple of 3200 in case DCS cares
 
 				return result;
 			}
