@@ -64,21 +64,27 @@ namespace DcsBios {
 				//if (hasUpdatedData())
 				 {
 					//Serial.write("Physical:");Serial.println(lastState_);
-
 					unsigned int dcsData = getData();
+
+					// Fake data to test my alignment maths
+					lastState = 0;
+					dcsData = 32768;
+
 					//Serial.write("SyncDCS:");Serial.println(dcsData);
 					int requiredAdjustment = MapValue(lastState_, dcsData);
 					
-					//Serial.write("Delta:");Serial.print(deltaDcsToPit);
+					Serial.write("lastState_:");Serial.println(lastState_);
+					Serial.write("dcsData:");Serial.println(dcsData);
+					Serial.write("requiredAdjustment:");Serial.println(requiredAdjustment);
 					
 					// Send the adjustment to DCS
-					if( requiredAdjustment != 0 )
-					{
-						char buff[5];
-						//itoa(requiredAdjustment, buff, 10);
-						sprintf(buff, "%+d", requiredAdjustment);
-						tryToSendDcsBiosMessage(msg_, buff);
-					}
+					// if( requiredAdjustment != 0 )
+					// {
+					// 	char buff[5];
+					// 	//itoa(requiredAdjustment, buff, 10);
+					// 	sprintf(buff, "%+d", requiredAdjustment);
+					// 	tryToSendDcsBiosMessage(msg_, buff);
+					// }
 				}
 			}
 
