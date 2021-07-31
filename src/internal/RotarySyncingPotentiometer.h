@@ -30,6 +30,8 @@ namespace DcsBios {
 
 			unsigned int mask;
 			unsigned char shift;
+
+			unsigned long lastSendTime;
 			
 		public:
 			RotarySyncingPotentiometerEWMA(const char* msg, char pin,
@@ -42,6 +44,7 @@ namespace DcsBios {
 
 				this->mask = syncToMask;
 				this->shift = syncToShift;
+				lastSendTime = millis();
 			}
 
 			void SetControl( const char* msg )
@@ -61,7 +64,7 @@ namespace DcsBios {
 			// Reminder: If this works, consider making it more general.  Either a control that implement IBuffer but takes a new IControl interface and a callback.  Or heck if I go that far, I'm back to simply making it a callback though right?
 			virtual void loop() {
 				// If this syncs at all, I think I'll still need something to slow it down
-				//if (hasUpdatedData())
+				if (hasUpdatedData())
 				 {
 					//Serial.write("Physical:");Serial.println(lastState_);
 					unsigned int dcsData = getData();
@@ -73,17 +76,21 @@ namespace DcsBios {
 					//Serial.write("SyncDCS:");Serial.println(dcsData);
 					int requiredAdjustment = MapValue(lastState_, dcsData);
 					
-					Serial.println("**************");
-					Serial.write("lastState_:");Serial.println(lastState_);
-					Serial.write("dcsData:");Serial.println(dcsData);
-					Serial.write("requiredAdjustment:");Serial.println(requiredAdjustment);
+					//Serial.println("**************");
+					//Serial.write("lastState_:");Serial.println(lastState_);
+					//Serial.write("dcsData:");Serial.println(dcsData);
+					//Serial.write("requiredAdjustment:");Serial.println(requiredAdjustment);
 					
 					// Send the adjustment to DCS
 					if( requiredAdjustment != 0 )
 					{
-						char buff[6];
-						sprintf(buff, "%+d", requiredAdjustment);
-						tryToSendDcsBiosMessage(msg_, buff);
+						if( millis() - lastSendTime > 1000)
+						{
+							char buff[6];
+							sprintf(buff, "%+d", requiredAdjustment);
+							tryToSendDcsBiosMessage(msg_, buff);
+							lastSendTime = millis();
+						}
 					}
 				}
 			}
