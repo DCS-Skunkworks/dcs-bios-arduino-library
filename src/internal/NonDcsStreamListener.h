@@ -53,9 +53,8 @@ namespace DcsBios {
 			unsigned int rcvIdx;
 		public:
 			NonDcsStreamBuffer(void (*callback)(char*)) : NonDcsStreamListener() {
-				memset(receivingBuffer, ' ', LENGTH-1);
-				receivingBuffer[LENGTH] = '\0';
-				userBuffer[LENGTH] = '\0';
+				memset(receivingBuffer, '\0', LENGTH);
+				memset(userBuffer, '\0', LENGTH);
 				
 				receivingDirty = false;
 				userDirty = false;
@@ -66,13 +65,14 @@ namespace DcsBios {
 				if( data == '\n' && receivingDirty )
 				{
 					noInterrupts();
-					memcpy(userBuffer, receivingBuffer, LENGTH);
+					memcpy(userBuffer, receivingBuffer, rcvIdx);
+					userBuffer[rcvIdx] = '\0';
 					receivingDirty = false;
 					rcvIdx = 0;
 					userDirty = true;
 					interrupts();
 				}
-				else if( rcvIdx < LENGTH)
+				else if( rcvIdx < LENGTH-1)
 				{
 					receivingBuffer[rcvIdx] = data;
 					receivingDirty = true;
