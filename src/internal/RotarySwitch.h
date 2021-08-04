@@ -5,13 +5,6 @@
 #include "PollingInput.h"
 
 namespace DcsBios {
-	enum StepsPerDetent {
-		ONE_STEP_PER_DETENT = 1,
-		TWO_STEPS_PER_DETENT = 2,
-		FOUR_STEPS_PER_DETENT = 4,
-		EIGHT_STEPS_PER_DETENT = 8,
-	};
-
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME, StepsPerDetent stepsPerDetent = ONE_STEP_PER_DETENT>
 	class RotarySwitchT : PollingInput, public ResettableInput {
 	private:
