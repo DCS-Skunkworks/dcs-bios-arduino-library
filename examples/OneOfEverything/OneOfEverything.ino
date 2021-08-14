@@ -47,6 +47,9 @@ DcsBios::Potentiometer potentiometerExample("MSG_0", 1);
 // An inverted version of a linear axis control
 DcsBios::Potentiometer invertedPotentiometerExample("MSG_0", 1, true);
 
+// Rotary encoder being used to control something that is an N-pos switch in DCS.  3 represents the number of positions of the switch in DCS.
+DcsBios::RotarySwitch rotarySwitchExample("MSG_0", 1, 2, 3);
+
 // Outputs
 ///////////
 // A single LED
