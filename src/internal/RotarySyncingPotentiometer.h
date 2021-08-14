@@ -6,7 +6,7 @@
 #include "PollingInput.h"
 
 namespace DcsBios {
-	int debugSyncVal = 0;
+	unsigned int debugSyncVal = 0;
 
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME, bool invert = false>
 	class RotarySyncingPotentiometerEWMA : PollingInput, Int16Buffer, public ResettableInput {
@@ -21,6 +21,7 @@ namespace DcsBios {
 
 			inline unsigned int readState()
 			{
+				//return 25000;
 				return map(analogRead(pin_), invert?1023:0, invert?0:1023, 0, 65535);
 			}
 
@@ -58,20 +59,18 @@ namespace DcsBios {
 			}
 
 			unsigned int getData() {
+				//return debugSyncVal;
 				return ((this->Int16Buffer::getData()) & mask) >> shift;
 			}
 
 			// Reminder: If this works, consider making it more general.  Either a control that implement IBuffer but takes a new IControl interface and a callback.  Or heck if I go that far, I'm back to simply making it a callback though right?
 			virtual void loop() {
 				// If this syncs at all, I think I'll still need something to slow it down
+				// TODO: updated data or was a delta last time?
 				//if (hasUpdatedData())
 				 {
 					//Serial.write("Physical:");Serial.println(lastState_);
 					unsigned int dcsData = getData();
-
-					// Fake data to test my alignment maths
-					lastState_ = 16384;
-					//dcsData = 32768;
 
 					//Serial.write("SyncDCS:");Serial.println(dcsData);
 					int requiredAdjustment = MapValue(lastState_, dcsData);
@@ -81,10 +80,13 @@ namespace DcsBios {
 					//Serial.write("dcsData:");Serial.println(dcsData);
 					//Serial.write("requiredAdjustment:");Serial.println(requiredAdjustment);
 					
+// One of the two values is not what I think it is.  I watched it consistently moving to 1.2 on the guage at 1 turn per second (approx), and when he cranked down in DCS, it moved back to the same spot).
+// However when he turned right, it correct back down but to around 1.8, then fell off the rails.
+
 					// Send the adjustment to DCS
 					if( requiredAdjustment != 0 )
 					{
-						if( millis() - lastSendTime > 1000)
+						if( millis() - lastSendTime > 200)
 						{
 							char buff[6];
 							sprintf(buff, "%+d", requiredAdjustment);
@@ -96,7 +98,7 @@ namespace DcsBios {
 			}
 
 			// This will be a callback ingested later, but for now
-			int MapValue(unsigned int physicalPosition, unsigned int dcsPosition)
+			static int MapValue(unsigned int physicalPosition, unsigned int dcsPosition)
 			{
 				// Initial testing here is for hornet min height, with the input being a 
 				// +/- 3200 rotary and the output being in the range 0-65535, so I'm GUESSING
@@ -104,19 +106,23 @@ namespace DcsBios {
 
 				// For the pilot project: Potentiometer lastState range is 0 to 65535.
 				// dcs data is 0 to 64355
+				unsigned int a = physicalPosition;
+				unsigned int b = map(dcsPosition,0,64355,0,65535);
 
-				int deltaPitToDcs = (int)physicalPosition - (int)map(dcsPosition,0,64355,0,65535);
-				int result = 1 * deltaPitToDcs;
+				// TODO: Must be a smarter way to handle this 16 bit subtraction!?
+				unsigned int delta;
+				if( a >= b)
+					delta = a - b;
+				else
+					delta = b - a;
+				
+				if( delta > 9999 )
+					delta = 9999;
 
-				// Limit the range of adjustment
-				if( result > 9600)
-					result = 9600;
-				else if( result < -9600)
-					result = -9600;
-
-				result = (result/3200)*3200;	// Snap to a multiple of 3200 in case DCS cares
-
-				return result;
+				if( a >= b )
+					return (int)delta;
+				else
+					return -1*(int)delta;
 			}
 	};
 	typedef RotarySyncingPotentiometerEWMA<> RotarySyncingPotentiometer;
