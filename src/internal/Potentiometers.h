@@ -58,6 +58,11 @@ namespace DcsBios {
 			{
 				msg_ = msg;
 			}
+
+			void resetThisState()
+			{
+				this->resetState();
+			}
 	};
 	typedef PotentiometerEWMA<> Potentiometer;
 }
