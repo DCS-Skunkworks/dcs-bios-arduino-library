@@ -124,6 +124,10 @@ namespace DcsBios {
 				}
 			}
 
+      void resetState() {
+        lastState_ = (lastState_==0)?-1:0;
+      }
+
 		public:
       //init now expects a message (the identifier you are trying to control), an argument ("TOGGLE") and an address to a storage variable
 			MatActionButtonT(const char* msg, const char* arg, volatile unsigned char* argAddress) :
@@ -162,6 +166,10 @@ namespace DcsBios {
 					lastState_ = state;
 				}
 			}
+
+      void resetState() {
+        lastState_ = (lastState_==0)?-1:0;
+      }
 
 		public:
       //init now expects a message (the identifier you are trying to control), an argument ("TOGGLE") and an address to a storage variable
@@ -206,6 +214,10 @@ namespace DcsBios {
 				}
 			}
 
+      void resetState() {
+        lastState_ = (lastState_==0)?-1:0;
+      }
+
 		public:
       //init now expects row and column, as well as an array pointer, instead of a pin
 			MatActionButtonSetT(const char* msg, volatile unsigned char* argAddress, char onLvlArg) :
@@ -222,7 +234,7 @@ namespace DcsBios {
 				this->resetState();
 			}
 	};
-	typedef MatActionButtonToggleT<> MatActionButtonToggle;
+	typedef MatActionButtonSetT<> MatActionButtonSet;
 }
 
 #endif

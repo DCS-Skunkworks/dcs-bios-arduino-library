@@ -1,3 +1,16 @@
+## v0.3.6 (VNext)
+- Replaced InvertedPotentiometer class with a reverse bool constructor option for the existing potentiometer.
+- Added Synchronization example to layout different strategies for physical control <=> DCS synchronization on startup, periodic or on aircraft entry.
+  - Created new synchronization option via ResettableInput/resetThisState()
+
+## v0.3.5
+- Switched all examples to DCSBIOS_DEFAULTSERIAL for compatibility.
+- Updated some of the internal documentation.
+- Added details and more controls to OneOfEverything example.
+- Fixed errors with Matrix enabled buttons.
+- Added additional options to Dimmer class for a range map or complete custom mapping function.
+- Removed conditional requirement in servo.h.  There is some risk this may not build on some hardware, so please open an issue asap if you find errors regarding Servos.h
+
 ## v0.3.4
 
 - Fix missing methods in PotentiometerInv causing a build error.
@@ -6,7 +19,7 @@
 
 ## v0.3.3
 
-- Added ToggleSwitch to allow a single (presumably momentary) button to send alternating values for a single command on rising edges (pushes) of said button.
+- Added ToggleButton to allow a single (presumably momentary) button to send alternating values for a single command on rising edges (pushes) of said button.
 
 ## v0.3.2
 - Added new feature for SwitchMultiPos, allowing a "default" state to be specified for controls that can have a default state.  For example, A-10 Emergency Trim without a center detent
