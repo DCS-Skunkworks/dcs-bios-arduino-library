@@ -11,8 +11,8 @@ namespace DcsBios {
 	private:
 		const char* msg_;
 		char pin_;
+		char debounceSteadyState_;
 		char lastState_;
-		char switchState_;
 		bool reverse_;
 		unsigned long debounceDelay_;
 		unsigned long lastDebounceTime = 0;
@@ -21,22 +21,25 @@ namespace DcsBios {
 		{
 			lastState_ = (lastState_==0)?-1:0;
 		}
+
 		void pollInput() {
 			char state = digitalRead(pin_);
 			if (reverse_) state = !state;
-			if (state != lastState_) {
-				lastDebounceTime = millis();
+
+			unsigned long now = millis();
+
+			if (state != debounceSteadyState_) {
+				lastDebounceTime = now;
+				debounceSteadyState_ = state;
 			}
 			
-			if ((millis() - lastDebounceTime) > debounceDelay_) {
-				if (state != switchState_) {
+			if ((now - lastDebounceTime) >= debounceDelay_) {
+				if (debounceSteadyState_ != lastState_) {
 					if (tryToSendDcsBiosMessage(msg_, state == HIGH ? "0" : "1")) {
-						switchState_ = state;
+						lastState_ = debounceSteadyState_;
 					}
 				}
-			}
-
-			lastState_ = state;
+			}			
 		}
 	public:
 		Switch2PosT(const char* msg, char pin, bool reverse = false, unsigned long debounceDelay = 50) :
@@ -45,10 +48,11 @@ namespace DcsBios {
 			msg_ = msg;
 			pin_ = pin;
 			pinMode(pin_, INPUT_PULLUP);
-			switchState_ = digitalRead(pin_);
-			lastState_ = switchState_;
-			reverse_ = reverse;
 			debounceDelay_ = debounceDelay;
+			reverse_ = reverse;
+
+			lastState_ = digitalRead(pin_);
+			if (reverse_) lastState_ = !lastState_;			
 		}
 				
 		void SetControl( const char* msg )
@@ -202,7 +206,7 @@ namespace DcsBios {
 		char pinA_;
 		char pinB_;
 		char lastState_;
-		char steadyState_;
+		char debounceSteadyState_;
 		unsigned long debounceDelay_;
 		unsigned long lastDebounceTime = 0;
 
@@ -214,36 +218,35 @@ namespace DcsBios {
 		void resetState()
 		{
 			lastState_ = (lastState_==0)?-1:0;
-			steadyState_ = lastState_;
 		}
 		void pollInput() {
 			char state = readState();
-			if (state != lastState_) {
-				lastDebounceTime = millis();
+			unsigned long now = millis();
+			if (state != debounceSteadyState_) {
+				lastDebounceTime = now;
+				debounceSteadyState_ = state;
 			}
 
-			if ((millis() - lastDebounceTime) > debounceDelay_)
+			if ((now - lastDebounceTime) >= debounceDelay_)
 			{
-				if (state != steadyState_) {
+				if (state != lastState_) {
 					if (state == 0)
 					{
 						if (tryToSendDcsBiosMessage(msg_, "0"))
-							steadyState_ = state;
+							lastState_ = state;
 					}
 					else if (state == 1)
 					{
 						if (tryToSendDcsBiosMessage(msg_, "1"))
-							steadyState_ = state;
+							lastState_ = state;
 					}
 					else if (state == 2)
 					{
 						if(tryToSendDcsBiosMessage(msg_, "2"))
-							steadyState_ = state;
+							lastState_ = state;
 					}
 				}
 			}
-
-			lastState_ = state;
 		}
 	public:
 		Switch3PosT(const char* msg, char pinA, char pinB, unsigned long debounceDelay = 50) :
@@ -255,7 +258,7 @@ namespace DcsBios {
 			pinMode(pinA_, INPUT_PULLUP);
 			pinMode(pinB_, INPUT_PULLUP);
 			lastState_ = readState();
-			steadyState_ = lastState_;
+			debounceSteadyState_ = lastState_;
 			debounceDelay_ = debounceDelay;
 		}
 		
