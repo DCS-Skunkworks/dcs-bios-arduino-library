@@ -2,7 +2,7 @@
 
 This is an Arduino library that makes it easy to write sketches that talk to DCS-BIOS.
 
-For more information and documentation, see the [DCS-BIOS FlightPanels Project](https://github.com/DCSFlightpanels).
+For more information and documentation, see the [DCS-BIOS FlightPanels Project](https://github.com/DCSFlightpanels) and the (WIP) Arduino wiki here: https://github.com/talbotmcinnis/dcs-bios-arduino-library/wiki.
 
 ## Origins
 
