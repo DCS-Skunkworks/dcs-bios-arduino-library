@@ -62,6 +62,85 @@ namespace DcsBios {
 		}
 	};
 	typedef Switch2PosT<> Switch2Pos;
+
+	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
+	class SwitchWithCover2PosT : PollingInput, public ResettableInput
+	{
+	private:
+		const char* switchMsg_;
+		const char* coverMsg_;
+		char pin_;
+		char lastState_;
+		char switchState_;
+		bool reverse_;
+		unsigned long debounceDelay_;
+		unsigned long lastDebounceTime = 0;
+
+		void resetState()
+		{
+			lastState_ = (lastState_==0)?-1:0;
+		}
+		void pollInput() {
+			char state = digitalRead(pin_);
+			if (reverse_) state = !state;
+			if (state != lastState_) {
+				lastDebounceTime = millis();
+			}
+			
+			if ((millis() - lastDebounceTime) > debounceDelay_) {
+				if (state != switchState_) {
+					if( state )
+					{
+						// Close the switch, so close the cover second
+						if (tryToSendDcsBiosMessage(switchMsg_, "0"))
+						{
+							delay(200);
+							if (tryToSendDcsBiosMessage(coverMsg_, "0"))
+							{
+								switchState_ = state;
+							}
+						}
+					}
+					else
+					{
+						// Turning the switch on, so open the cover first
+						if (tryToSendDcsBiosMessage(coverMsg_, "1"))
+						{
+							delay(200);
+							if (tryToSendDcsBiosMessage(switchMsg_, "1"))
+							{
+								switchState_ = state;
+							}
+						}
+					}
+					
+
+					
+				}
+			}
+
+			lastState_ = state;
+		}
+	public:
+		SwitchWithCover2PosT(const char* switchMessage, const char* coverMessage, char pin, bool reverse = false, unsigned long debounceDelay = 50) :
+			PollingInput(pollIntervalMs)
+		{ 
+			switchMsg_ = switchMessage;
+			coverMsg_ = coverMessage;
+			pin_ = pin;
+			pinMode(pin_, INPUT_PULLUP);
+			switchState_ = digitalRead(pin_);
+			lastState_ = switchState_;
+			reverse_ = reverse;
+			debounceDelay_ = debounceDelay;
+		}
+
+		void resetThisState()
+		{
+			this->resetState();
+		}
+	};
+	typedef SwitchWithCover2PosT<> SwitchWithCover2Pos;
 	
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
 	class Switch3PosT : PollingInput, public ResettableInput
