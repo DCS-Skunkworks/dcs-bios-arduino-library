@@ -24,6 +24,8 @@ DcsBios::Switch3Pos switch3PosExample("MSG_0", 1, 2);
 // A multiple position switch, often a rotary switch
 const byte multiPosPins[4] = {1,2,3,4};
 DcsBios::SwitchMultiPos switchMulitPosExample("MSG_0", multiPosPins, 4);
+// A switch that has a cover in DCS that must be opened before the switch itself can be activated
+DcsBios::SwitchWithCover2Pos pltLaunchbarAbort("PLT_LAUNCHBAR_ABORT", "PLT_LAUNCHBAR_ABORT_COVER", 6);
 
 // Analogs
 ///////////
