@@ -128,6 +128,7 @@ do not come with their own build system, we are just putting everything into the
 #include "internal/BcdWheels.h"
 #include "internal/AnalogMultiPos.h"
 #include "internal/RotarySwitch.h"
+#include "internal/MatrixSwitches.h"
 
 namespace DcsBios {
 	template<unsigned int first, unsigned int second>

@@ -1,5 +1,5 @@
 /*
-    Name:				Button_Matrix_Example.ino
+    Name:				Button_matrix_Example.ino
     Created:			10/06/2019 2:27:18 PM
     Author:				Azza276
 	Button Matrix by:	ChronoZoggt
@@ -18,6 +18,7 @@
 
 #include <Arduino.h>
 #define DCSBIOS_DEFAULT_SERIAL //Use DCSBIOS_DEFAULT_SERIAL is IRQ does not work.
+#define USE_MATRIX_SWITCHES
 #include "DcsBios.h"
 
 
@@ -74,6 +75,8 @@ DcsBios::MatActionButton ufcClr("UFC_CLR", "TOGGLE", &in_mat[3][0]);
 DcsBios::MatActionButton ufc0("UFC_0", "TOGGLE", &in_mat[3][1]);
 DcsBios::MatActionButton ufcEnt("UFC_ENT", "TOGGLE", &in_mat[3][2]);*/
 
+DcsBios::Matrix2Pos aapCdupwr("AAP_CDUPWR", 2, 2);
+DcsBios::Matrix3Pos ahcpAltSce("AHCP_ALT_SCE", 1, 2, 1, 2);
 
 // The setup() function runs once each time the micro-controller starts
 void setup() {
