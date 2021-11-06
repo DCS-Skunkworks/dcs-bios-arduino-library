@@ -45,7 +45,7 @@ namespace DcsBios {
 			lastState_ = state;
 			
 			if (delta_ >= stepsPerDetent) {
-				switchValue_ = min(switchValue_+1, maxSwichValue_);
+				switchValue_ = min((signed char)(switchValue_+1), maxSwichValue_);
 				char buf[7];
 				utoa(switchValue_, buf, 10);
 				if (tryToSendDcsBiosMessage(msg_, buf))
