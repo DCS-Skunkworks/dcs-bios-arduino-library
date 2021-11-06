@@ -1,3 +1,8 @@
+/** 
+ *  @file   Switches.h
+ *  @brief  Some switches
+ ***********************************************/
+
 #ifndef __DCSBIOS_SWITCHES_H
 #define __DCSBIOS_SWITCHES_H
 
@@ -5,6 +10,11 @@
 #include "Arduino.h"
 
 namespace DcsBios {
+	/** 
+ 	*  @brief  2 Position Switch
+	*  @details These are details
+	*  @tparam pollIntervalMs Number of milliseconds between when this switch is polled, or POLL_EVERY_TIME to poll at max frequency.
+ 	***********************************************/
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
 	class Switch2PosT : PollingInput, public ResettableInput
 	{
@@ -39,6 +49,12 @@ namespace DcsBios {
 			lastState_ = state;
 		}
 	public:
+		/** 
+		 *  @param msg The DCS message to send
+		 *  @param pin The pin connected to the switch
+		 *  @param reverse [Optional] Invert the logic level of this switch.
+		 *  @param debounceDelay [Optional] The amount of time in ms to allow the switch to finish bouncing.
+		 ***********************************************/
 		Switch2PosT(const char* msg, char pin, bool reverse = false, unsigned long debounceDelay = 50) :
 			PollingInput(pollIntervalMs)
 		{ 

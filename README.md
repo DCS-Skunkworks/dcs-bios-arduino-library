@@ -12,6 +12,18 @@ DCS-BIOS was originally developed here, [DCS-BIOS project.](https://github.com/d
 
 This is a community maintained plugin.  Support is best found at the DCS-Flightpanels discord channel.  The wiki is very much a work in progress, and can be found here: https://github.com/talbotmcinnis/dcs-bios-arduino-library/wiki
 
+## Controls reference
+
+Controls are documented in code via DOxygen.
+
+To export, pre-requisits:
+
+- Install DOxygen from [CPP / C++ Notes - Doxygen - Documentation Generator (caiorss.github.io)](https://caiorss.github.io/C-Cpp-Notes/Doxygen-documentation.html#org430cc5a)
+
+- ```powershell
+  choco install doxygen.portable --version 1.8.9.1
+  ```
+
 ## Releasing
 
 1. Bump version number in library.properties
