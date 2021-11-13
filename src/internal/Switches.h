@@ -107,7 +107,7 @@ namespace DcsBios {
 				(millis() - lastDebounceTime) > debounceDelay_) 
 			{
 				// Switch has debounced and changed state
-				if( lastSwitchStateTime - millis() >= 200 )
+				if( millis() - lastSwitchStateTime > 200 )
 				{
 					// Switch/cover delay has been satisfied.
 					if( state )
