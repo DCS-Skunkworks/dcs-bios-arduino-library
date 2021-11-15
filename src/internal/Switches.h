@@ -63,7 +63,7 @@ namespace DcsBios {
 	};
 	typedef Switch2PosT<> Switch2Pos;
 
-	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
+	template <unsigned long pollIntervalMs = POLL_EVERY_TIME, unsigned long coverDelayMs = 200>
 	class SwitchWithCover2PosT : PollingInput, public ResettableInput
 	{
 	private:
@@ -107,7 +107,7 @@ namespace DcsBios {
 				(millis() - lastDebounceTime) > debounceDelay_) 
 			{
 				// Switch has debounced and changed state
-				if( millis() - lastSwitchStateTime > 200 )
+				if( millis() - lastSwitchStateTime > coverDelayMs )
 				{
 					// Switch/cover delay has been satisfied.
 					if( state )
