@@ -62,6 +62,137 @@ namespace DcsBios {
 		}
 	};
 	typedef Switch2PosT<> Switch2Pos;
+
+	template <unsigned long pollIntervalMs = POLL_EVERY_TIME, unsigned long coverDelayMs = 200>
+	class SwitchWithCover2PosT : PollingInput, public ResettableInput
+	{
+	private:
+		const char* switchMsg_;
+		const char* coverMsg_;
+		char pin_;
+		char lastState_;
+		char switchState_;
+		bool reverse_;
+		unsigned long debounceDelay_;
+		unsigned long lastDebounceTime = 0;
+
+		enum switchCoverStateEnum{
+			stOFF_CLOSED = 0,
+			stOFF_OPEN = 1,
+			stON_OPEN = 2
+		};
+
+		switchCoverStateEnum switchCoverState_;
+		unsigned long lastSwitchStateTime;
+
+		void resetState()
+		{
+			lastState_ = (lastState_==0)?-1:0;
+
+			if( switchState_ && !reverse_ )
+				switchCoverState_ = stOFF_CLOSED;
+			else
+				switchCoverState_ = stON_OPEN;
+			lastSwitchStateTime = millis();
+		}
+
+		void pollInput() {
+			char state = digitalRead(pin_);
+			if (reverse_) state = !state;
+			if (state != lastState_) {
+				lastDebounceTime = millis();
+			}
+			
+			if (state != switchState_ && 
+				(millis() - lastDebounceTime) > debounceDelay_) 
+			{
+				// Switch has debounced and changed state
+				if( millis() - lastSwitchStateTime > coverDelayMs )
+				{
+					// Switch/cover delay has been satisfied.
+					if( state )
+					{
+						// Closing/turning off
+						switch(switchCoverState_)
+						{
+							case stON_OPEN:
+								if (tryToSendDcsBiosMessage(switchMsg_, "0"))
+								{
+									switchCoverState_ = stOFF_OPEN;
+									lastSwitchStateTime = millis();
+								}
+								break;
+
+							case stOFF_OPEN:
+								if (tryToSendDcsBiosMessage(coverMsg_, "0"))
+								{
+									switchCoverState_ = stOFF_CLOSED;
+									lastSwitchStateTime = millis();
+									switchState_ = state;									
+								}
+								break;
+								
+							case stOFF_CLOSED:
+								// Converged on steady state.  Good.
+								break;
+						}
+					}
+					else
+					{
+						// Opening/turning on
+						switch(switchCoverState_)
+						{
+							case stOFF_CLOSED:
+								if (tryToSendDcsBiosMessage(coverMsg_, "1"))
+								{
+									switchCoverState_ = stOFF_OPEN;
+									lastSwitchStateTime = millis();
+								}
+								break;
+
+							case stOFF_OPEN:
+								if (tryToSendDcsBiosMessage(switchMsg_, "1"))
+								{
+									switchCoverState_ = stON_OPEN;
+									lastSwitchStateTime = millis();
+									switchState_ = state;
+								}
+								break;
+
+							case stON_OPEN:
+								// Converged on steady state.  Good.
+								break;
+
+						}
+					}
+				}
+			}
+
+			lastState_ = state;
+		}
+
+	public:
+		SwitchWithCover2PosT(const char* switchMessage, const char* coverMessage, char pin, bool reverse = false, unsigned long debounceDelay = 50) :
+			PollingInput(pollIntervalMs)
+		{ 
+			switchMsg_ = switchMessage;
+			coverMsg_ = coverMessage;
+			pin_ = pin;
+			pinMode(pin_, INPUT_PULLUP);
+			switchState_ = digitalRead(pin_);
+			lastState_ = switchState_;
+			reverse_ = reverse;
+			debounceDelay_ = debounceDelay;
+
+			resetState();
+		}
+
+		void resetThisState()
+		{
+			this->resetState();
+		}
+	};
+	typedef SwitchWithCover2PosT<> SwitchWithCover2Pos;
 	
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
 	class Switch3PosT : PollingInput, public ResettableInput
