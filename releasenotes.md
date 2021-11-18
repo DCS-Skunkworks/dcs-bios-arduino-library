@@ -1,3 +1,9 @@
+## v0.3.7
+- Integrate 2 and 3 position Matrix switches, thanks to Dehuman for the starting point!
+- Fix STM32 compilation issue.  Confirmed working on Bluepill and SparkFun.
+- Added Switch2PosWithCover as a way to have one physical switch control a DCS switch that has a cover that must be toggled before the switch under
+  it can be toggled.
+
 ## v0.3.6
 - Replaced InvertedPotentiometer class with a reverse bool constructor option for the existing potentiometer.
 - Added Synchronization example to layout different strategies for physical control <=> DCS synchronization on startup, periodic or on aircraft entry.
