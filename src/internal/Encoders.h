@@ -226,6 +226,72 @@ namespace DcsBios {
 		}
   };
   typedef RotaryAcceleratedEncoderT<> RotaryAcceleratedEncoder;
+
+  template <unsigned long pollIntervalMs = POLL_EVERY_TIME, StepsPerDetent stepsPerDetent = ONE_STEP_PER_DETENT>
+  class MatRotaryEncoderT : PollingInput {
+  private:
+    const char* msg_;
+    const char* decArg_;
+    const char* incArg_;
+    volatile unsigned char* addressA_;
+    volatile unsigned char* addressB_;
+    char lastState_;
+    int delta_ = 0;
+
+    char readState() {
+      return ((byte) *addressA_ << 1) | (byte) *addressB_;
+    }
+
+    void resetState() {
+      lastState_ = (lastState_==0)?-1:0;
+    }
+
+    void pollInput() {
+      char state = readState();
+      switch(lastState_) {
+        case 0:
+          if (state == 2) delta_--;
+          if (state == 1) delta_++;
+          break;
+        case 1:
+          if (state == 0) delta_--;
+          if (state == 3) delta_++;
+          break;
+        case 2:
+          if (state == 3) delta_--;
+          if (state == 0) delta_++;
+          break;
+        case 3:
+          if (state == 1) delta_--;
+          if (state == 2) delta_++;
+          break;
+      }
+      lastState_ = state;
+
+      if (delta_ >= stepsPerDetent) {
+        if (tryToSendDcsBiosMessage(msg_, incArg_))
+          delta_ -= stepsPerDetent;
+      }
+      if (delta_ <= -stepsPerDetent) {
+        if (tryToSendDcsBiosMessage(msg_, decArg_))
+          delta_ += stepsPerDetent;
+      }
+    }
+
+  public:
+    MatRotaryEncoderT(const char* msg, const char* decArg, const char* incArg, volatile unsigned char* argAddressA, volatile unsigned char* argAddressB) :
+      PollingInput(pollIntervalMs) {
+      msg_ = msg;
+      decArg_ = decArg;
+      incArg_ = incArg;
+      addressA_ = argAddressA;
+      addressB_ = argAddressB;
+      delta_ = 0;
+      lastState_ = readState();
+    }
+  };
+  typedef MatRotaryEncoderT<> MatRotaryEncoder;
+
 }
 
 #endif
