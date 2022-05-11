@@ -52,6 +52,9 @@ DcsBios::Potentiometer invertedPotentiometerExample("MSG_0", 1, true);
 // Rotary encoder being used to control something that is an N-pos switch in DCS.  3 represents the number of positions of the switch in DCS.
 DcsBios::RotarySwitch rotarySwitchExample("MSG_0", 1, 2, 3);
 
+// A 4 pin Grey code rotary switch acting as a inc/dec encoder
+DcsBios::GrayCodeEncoder grayCodeEncoderExample("MSG_0", "ARG_DEC", "ARG_INC", 1,2,3,4);
+
 // Outputs
 ///////////
 // A single LED
