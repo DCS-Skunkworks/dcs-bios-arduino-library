@@ -15,6 +15,9 @@ DcsBios::ActionButton iffDec("IFF_CODE", "INC", 1);
 // Used when a physical switch is a momentary button, but needs to sent alternating arguments each time it is pressed
 DcsBios::ToggleButton toggleButtonExample("MSG_0", "ARG_0", "ARG_1", 1);
 
+// A dual mode button with a master switch which toggles the function of a physical pit button between two different DCS functions.  Think multi-seat aircraft.
+DcsBios::DualModeButton dualModeButtonExample(0, 1, "MSG_INMODE0", "MSG_INMODE1");
+
 // Switches
 ////////////
 // A standard two position on/off
