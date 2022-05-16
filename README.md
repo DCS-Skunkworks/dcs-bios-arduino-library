@@ -10,7 +10,7 @@ DCS-BIOS was originally developed here, [DCS-BIOS project.](https://github.com/d
 
 ## Support & Documentation
 
-This is a community maintained plugin.  Support is best found at the DCS-Flightpanels discord channel.  The wiki is very much a work in progress, and can be found here: https://github.com/talbotmcinnis/dcs-bios-arduino-library/wiki
+This is a community maintained plugin.  Support is best found at the DCS-Flightpanels discord channel.  The wiki is very much a work in progress, and can be found here: https://github.com/DCSFlightpanels/dcs-bios-arduino-library/wiki
 
 ## Releasing
 
