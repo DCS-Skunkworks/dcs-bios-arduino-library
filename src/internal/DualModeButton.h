@@ -30,11 +30,11 @@ namespace DcsBios {
                 if(mode != lastMode_)
                 {
                     // Switched seat.  If we had a button held, make sure to release it
-                    if( lastState_ )
+                    if( lastState_ == LOW)
                     {
                         tryToSendDcsBiosMessage(lastMode_?msgMode2_:msgMode1_, "0");
                         lastMode_ = mode;
-                        lastState_ = 0;
+                        lastState_ = HIGH;
                     }
                 }
 
