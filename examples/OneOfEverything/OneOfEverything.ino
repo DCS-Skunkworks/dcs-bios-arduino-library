@@ -77,6 +77,7 @@ const int ANALOG_OUT_PIN_A = 16;
 // A single LED
 DcsBios::Dimmer defaultDimmerExample(0x1012, OUT_PIN_A);
 DcsBios::LED masterCaution(0x1012, 0x0800, OUT_PIN_A);
+
 DcsBios::LED invertedLedExample(0x1012, 0x0800, OUT_PIN_A, true);
 
 // An analog output with a value that comes from a DCS address
