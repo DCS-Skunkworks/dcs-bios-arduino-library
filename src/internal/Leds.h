@@ -10,17 +10,17 @@ namespace DcsBios {
 		private:
 			unsigned int mask;
 			unsigned char pin;
+			bool reverse;
 		public:
-			LED(unsigned int address, unsigned int mask, char pin) : Int16Buffer(address), mask(mask), pin(pin) {
+			LED(unsigned int address, unsigned int mask, char pin, bool reverse = false) : Int16Buffer(address), mask(mask), pin(pin), reverse(reverse) {
 				pinMode(pin, OUTPUT);
 			}
 			virtual void loop() {
 				if (hasUpdatedData()) {
-					if (getData() & mask) {
-						digitalWrite(pin, 1);
-					} else {
-						digitalWrite(pin, 0);
-					}
+					bool state = getData() & mask;
+					if (reverse) state = !state;
+					
+					digitalWrite(pin, state);					
 				}
 			}
 	};

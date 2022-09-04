@@ -2,6 +2,7 @@
 - Added input_min and input_max optional parameters to PotentiometerEWMA to allow a user to calibrate their analog inputs if their physical control does not utilize the full range available to the controller.
 - Fix Switch2Pos state reset logic, and improve it's internal debounce logic for a few edge cases.
 - Add DualModeButton for first multi-seat support.  Originally developed for use in Apache cockpits where one switch toggles the function of a physical button between front and back seat DCS control.
+- Integrated No1sonuk's inverted LED support.  LEDs now take an optional parameter which can be used to have an SimPit LED operate opposite to a DcsPit LED.
 
 ## v0.3.7
 - Integrate 2 and 3 position Matrix switches, thanks to Dehuman for the starting point!
