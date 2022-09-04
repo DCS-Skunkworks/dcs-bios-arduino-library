@@ -292,6 +292,112 @@ namespace DcsBios {
   };
   typedef MatRotaryEncoderT<> MatRotaryEncoder;
 
+  	//To emulate dual concentric rotary encoders/resolvers/potentiometers using a rotary encoder with a push button.
+	//Secondary message is used when push button or switch is enabled.
+
+	template <unsigned long pollIntervalMs = POLL_EVERY_TIME, StepsPerDetent stepsPerDetent = ONE_STEP_PER_DETENT>
+	class EmulatedConcentricRotaryEncoderT : PollingInput, public ResettableInput {
+	private:
+		const char* msg1_;	//Function 1 (default)
+		const char* decArg1_;
+		const char* incArg1_;
+		const char* msg2_;	//Function 2
+		const char* decArg2_;
+		const char* incArg2_;
+		char pinA_;
+		char pinB_;
+		char pinC_;	//Integrated button pin
+		bool msg1Mode_;
+		char prevMode_;
+		char lastState_;
+		signed char delta_;
+		
+		char readState() {
+			return (digitalRead(pinA_) << 1) | digitalRead(pinB_);
+		}
+		
+		void checkPress() {
+			char currentMode;
+			msg1Mode_ = ((currentMode = digitalRead(pinC_)) != prevMode_)?!msg1Mode_:msg1Mode_;
+			prevMode_ = currentMode;
+		}
+		
+		void resetState() {
+			lastState_ = (lastState_==0)?-1:0;
+		}
+		
+		void pollInput() {
+			char state = readState();
+			checkPress();
+			switch(lastState_) {
+				case 0:
+					if (state == 2) delta_--;
+					if (state == 1) delta_++;
+					break;
+				case 1:
+					if (state == 0) delta_--;
+					if (state == 3) delta_++;
+					break;
+				case 2:
+					if (state == 3) delta_--;
+					if (state == 0) delta_++;
+					break;
+				case 3:
+					if (state == 1) delta_--;
+					if (state == 2) delta_++;
+					break;
+			}
+			lastState_ = state;
+			
+			if ((delta_ >= stepsPerDetent) && (msg1Mode_)) {
+				if (tryToSendDcsBiosMessage(msg1_, incArg1_))
+					delta_ -= stepsPerDetent;
+			}
+			if ((delta_ <= -stepsPerDetent) && (msg1Mode_)) {
+				if (tryToSendDcsBiosMessage(msg1_, decArg1_))
+					delta_ += stepsPerDetent;
+			}
+			if ((delta_ >= stepsPerDetent) && (!msg1Mode_)) {
+				if (tryToSendDcsBiosMessage(msg2_, incArg2_))
+					delta_ -= stepsPerDetent;
+			}
+			if ((delta_ <= -stepsPerDetent) && (!msg1Mode_)) {
+				if (tryToSendDcsBiosMessage(msg2_, decArg2_))
+					delta_ += stepsPerDetent;
+			}
+		}
+	public:
+		EmulatedConcentricRotaryEncoderT(const char* msg1, const char* decArg1, const char* incArg1, const char* msg2, const char* decArg2, const char* incArg2, char pinA, char pinB, char pinC) :
+			PollingInput(pollIntervalMs) {
+			msg1_ = msg1;
+			decArg1_ = decArg1;
+			incArg1_ = incArg1;
+			msg2_ = msg2;
+			decArg2_ = decArg2;
+			incArg2_ = incArg2;
+			pinA_ = pinA;
+			pinB_ = pinB;
+			pinC_ = pinC;
+			msg1Mode_ = true;
+			prevMode_ = 1;
+			pinMode(pinA_, INPUT_PULLUP);
+			pinMode(pinB_, INPUT_PULLUP);
+			pinMode(pinC_, INPUT_PULLUP);
+			prevMode_ = digitalRead(pinC_);	//Prevents defaulting to secondary action on initialization
+			delta_ = 0;
+			lastState_ = readState();
+		}
+
+		void SetControl(const char* msg) {	
+			msg1_ = msg;
+		}
+		
+        
+		void resetThisState() {
+			this->resetState();
+		}
+	};
+	typedef EmulatedConcentricRotaryEncoderT<> EmulatedConcentricRotaryEncoder;
 }
 
 #endif
