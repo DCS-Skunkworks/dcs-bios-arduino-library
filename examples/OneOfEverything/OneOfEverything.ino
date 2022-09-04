@@ -46,6 +46,9 @@ DcsBios::RotaryEncoder rotaryEncoderExample("MSG_0", "ARG_DEC", "ARG_INC", 1, 2)
 DcsBios::RotaryAcceleratedEncoder rotaryAcceleratedEncoderExample("MSG_0", "ARG_DEC", "ARG_INC", "FAST_INC", "FAST_DEC", 1, 2);
 // A linear/analog axis on a single pin
 DcsBios::Potentiometer potentiometerExample("MSG_0", 1);
+// A linear axis control where the physical or electrical range of the input does utilize the full 0 to 1023 range.
+DcsBios::Potentiometer clippedPotentiometerExample("MSG_0", false, 256, 768);
+
 // An inverted version of a linear axis control
 DcsBios::Potentiometer invertedPotentiometerExample("MSG_0", 1, true);
 
