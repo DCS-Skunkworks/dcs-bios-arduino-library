@@ -3,6 +3,7 @@
 - Fix Switch2Pos state reset logic, and improve it's internal debounce logic for a few edge cases.
 - Add DualModeButton for first multi-seat support.  Originally developed for use in Apache cockpits where one switch toggles the function of a physical button between front and back seat DCS control.
 - Included AerialElectron's Concentric Rotary Encoder Emulator.  Useful for simpits with a rotary that has a pushbutton, to emulate controlling two different dcs cockpit controls, especially if the dcs controls are dual-ring concentric rotaries.  Thanks for the contribution AerialElectron!
+- Integrated No1sonuk's inverted LED support.  LEDs now take an optional parameter which can be used to have an SimPit LED operate opposite to a DcsPit LED.
 
 ## v0.3.7
 - Integrate 2 and 3 position Matrix switches, thanks to Dehuman for the starting point!

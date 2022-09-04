@@ -77,14 +77,22 @@ const int ANALOG_OUT_PIN_A = 16;
 // A single LED
 DcsBios::Dimmer defaultDimmerExample(0x1012, OUT_PIN_A);
 DcsBios::LED masterCaution(0x1012, 0x0800, OUT_PIN_A);
+
+DcsBios::LED invertedLedExample(0x1012, 0x0800, OUT_PIN_A, true);
+
 // An analog output with a value that comes from a DCS address
 DcsBios::Dimmer dimmerExample(0x1012, ANALOG_OUT_PIN_A);
+
+// An inverted demo that also demonstrates a custom range.  By the min (200) being greater than max (0), the inverted behaviour is created.
 DcsBios::Dimmer invertedDimmerExample(0x1012, ANALOG_OUT_PIN_A, 200, 0);
+
+// A dimmer where the user provided a mapping function.  In this case a simple modulus stepper, but could include non-linear functions, conditions, etc.
 unsigned int myValueMapper(unsigned int dcsValue)
 {
   return dcsValue % 10;
 }
 DcsBios::Dimmer mappedDimmerExample(0x1012, ANALOG_OUT_PIN_A, myValueMapper);
+
 // A servo motor controlleed from DCS, i.e. a guage.
 DcsBios::ServoOutput servoExample(0x1012, ANALOG_OUT_PIN_A, 544, 2400);
 
