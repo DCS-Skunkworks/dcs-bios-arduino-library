@@ -1,3 +1,6 @@
+## vNext
+- Added input_min and input_max optional parameters to PotentiometerEWMA to allow a user to calibrate their analog inputs if their physical control does not utilize the full range available to the controller.
+
 ## v0.3.7
 - Integrate 2 and 3 position Matrix switches, thanks to Dehuman for the starting point!
 - Fix STM32 compilation issue.  Confirmed working on Bluepill and SparkFun.
