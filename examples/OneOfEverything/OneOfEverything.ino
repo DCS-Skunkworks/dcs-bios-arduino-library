@@ -23,6 +23,8 @@ DcsBios::ToggleButton toggleButtonExample("MSG_0", "ARG_0", "ARG_1", PIN_A);
 // A dual mode button with a master switch which toggles the function of a physical pit button between two different DCS functions.  Think multi-seat aircraft.
 DcsBios::DualModeButton dualModeButtonExample(PIN_A, PIN_B, "MSG_INMODE0", "MSG_INMODE1");
 
+DcsBios::PotentiometerEWMA<5, 128, 5> pltEmergWingSweepltLever("PLT_EMERG_WING_SWEEPLT_LEVER", A0, false, 256, 768);
+
 // Switches
 ////////////
 // A standard two position on/off

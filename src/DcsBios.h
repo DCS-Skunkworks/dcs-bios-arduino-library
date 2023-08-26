@@ -125,12 +125,16 @@ do not come with their own build system, we are just putting everything into the
 #include "internal/Potentiometers.h"
 #include "internal/RotarySyncingPotentiometer.h"
 #include "internal/Leds.h"
+#ifndef DCSBIOS_DISABLE_SERVO
 #include "internal/Servos.h"
+#endif
 #include "internal/Dimmer.h"
 #include "internal/BcdWheels.h"
 #include "internal/AnalogMultiPos.h"
 #include "internal/RotarySwitch.h"
+#if defined(USE_MATRIX_SWITCHES) || defined(DCSBIOS_USE_MATRIX_SWITCHES)
 #include "internal/MatrixSwitches.h"
+#endif
 #include "internal/DualModeButton.h"
 
 namespace DcsBios {

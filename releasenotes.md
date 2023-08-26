@@ -1,3 +1,9 @@
+## v0.3.9
+- Included Addresses.h as an alternative way of including DCS address/mask information.  [Documentation needed].  Thanks @maciekish for the contribution!!
+- Example of PotentiometerEWMA added to OneOfEverything
+- Add support for #define DCSBIOS_DISABLE_SERVO to disable inclusion of servo.h on platforms which don't support it (ESP32)
+- Resolved confusing inclusion pattern for USE_MATRIX_SWITCHES, and supported more standardized version DCSBIOS_USE_MATRIX_SWITCHES.
+
 ## v0.3.8
 - Added input_min and input_max optional parameters to PotentiometerEWMA to allow a user to calibrate their analog inputs if their physical control does not utilize the full range available to the controller.
 - Fix Switch2Pos state reset logic, and improve it's internal debounce logic for a few edge cases.
