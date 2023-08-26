@@ -1,8 +1,6 @@
 #ifndef __DCSBIOS_MATRIX_SWITCHES_H
 #define __DCSBIOS_MATRIX_SWITCHES_H
 
-#ifdef USE_MATRIX_SWITCHES
-
 #include <math.h>
 #include "Arduino.h"
 #include "SwitchMatrix.h"	// https://github.com/dagoston93/SwitchMatrix
@@ -112,5 +110,4 @@ namespace DcsBios {
 	};
 	typedef Matrix3PosT<> Matrix3Pos;
 }
-#endif
 #endif	
