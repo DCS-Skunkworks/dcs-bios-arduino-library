@@ -14,6 +14,8 @@
 #include "internal/ExportStreamListener.h"
 #include "internal/PollingInput.h"
 #include "internal/Protocol.h"
+#include "internal/Addresses.h"
+
 
 #ifndef USART0_RX_vect
 #define USART0_RX_vect USART_RX_vect
