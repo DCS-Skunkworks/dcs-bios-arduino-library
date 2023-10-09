@@ -23,11 +23,12 @@ namespace DcsBios {
 			volatile unsigned char sync_byte_count;
 			
 			ExportStreamListener* startESL;
-			RingBuffer<64> incomingDataBuffer;
 			volatile bool processingData;
 		public:
+			RingBuffer<64> incomingDataBuffer;
 			void processChar(unsigned char c);
 			void processCharISR(unsigned char c);
+			uint8_t availableBufferSpace();
 			ProtocolParser();
 	};
 }

@@ -13,6 +13,10 @@ namespace DcsBios {
 		sync_byte_count = 0;
 	}
 
+	uint8_t ProtocolParser::availableBufferSpace() {
+		return incomingDataBuffer.availableForWrite();
+	}
+
 	/*
 		to be called from ISR
 		stores the character in a buffer, re-enables interrupts and processes the complete
@@ -20,7 +24,7 @@ namespace DcsBios {
 	*/
 	void ProtocolParser::processCharISR(unsigned char c) {
 		incomingDataBuffer.put(c);
-		if (processingData) return;
+		/*if (processingData) return;
 		
 		processingData = true;
 		while (1) {
@@ -34,7 +38,7 @@ namespace DcsBios {
 #ifdef DCSBIOS_RS485_SLAVE
 			noInterrupts();
 #endif
-		}
+		}*/
 	}
 	
 	void ProtocolParser::processChar(unsigned char c) {
