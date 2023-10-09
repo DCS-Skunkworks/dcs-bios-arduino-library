@@ -107,10 +107,7 @@ namespace DcsBios {
 			case RX_WAIT_DATA:
 				rxtx_len--;
 				if (rx_datatype == RXDATA_DCSBIOS_EXPORT) {
-					if (rxtx_len > parser.availableBufferSpace()) {
-						// Toggle D13 LED to indicate buffer overflow
-						PORTB ^= (1<<7);
-					} else {
+					if (rxtx_len <= parser.availableBufferSpace()) {
 						parser.processCharISR(c);
 					}
 				}
@@ -246,6 +243,7 @@ namespace DcsBios {
 		PollingInput::pollInputs();
 		ExportStreamListener::loopAll();
 
+		// Process incoming data outside of ISR
 		if (!parser.incomingDataBuffer.isEmpty()) {
 			unsigned char nextByte = parser.incomingDataBuffer.get();
 			parser.processChar(nextByte);

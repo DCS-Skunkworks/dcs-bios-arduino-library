@@ -14,6 +14,7 @@
 #include "internal/ExportStreamListener.h"
 #include "internal/PollingInput.h"
 #include "internal/Protocol.h"
+#include "internal/Protocol.cpp.inc"
 #include "internal/Addresses.h"
 
 

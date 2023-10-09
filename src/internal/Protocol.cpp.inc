@@ -24,7 +24,10 @@ namespace DcsBios {
 	*/
 	void ProtocolParser::processCharISR(unsigned char c) {
 		incomingDataBuffer.put(c);
-		/*if (processingData) return;
+
+		// For some reason RS485 slaves cannot process data here, while it works over USB. If DCSBIOS_RS485_SLAVE is defined, the processing is deferred to loop().
+		#ifndef DCSBIOS_RS485_SLAVE
+		if (processingData) return;
 		
 		processingData = true;
 		while (1) {
@@ -35,10 +38,8 @@ namespace DcsBios {
 			unsigned char nextByte = incomingDataBuffer.get();
 			interrupts();
 			processChar(nextByte);
-#ifdef DCSBIOS_RS485_SLAVE
-			noInterrupts();
-#endif
-		}*/
+		}
+		#endif
 	}
 	
 	void ProtocolParser::processChar(unsigned char c) {
