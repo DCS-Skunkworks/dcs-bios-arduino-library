@@ -9,6 +9,10 @@
 #define DCSBIOS_STATE_DATA_LOW 5
 #define DCSBIOS_STATE_DATA_HIGH 6
 
+#ifndef DCSBIOS_INCOMING_DATA_BUFFER_SIZE
+#define DCSBIOS_INCOMING_DATA_BUFFER_SIZE 64
+#endif
+
 #include "ExportStreamListener.h"
 #include "RingBuffer.h"
 
@@ -25,7 +29,7 @@ namespace DcsBios {
 			ExportStreamListener* startESL;
 			volatile bool processingData;
 		public:
-			RingBuffer<64> incomingDataBuffer;
+			RingBuffer<DCSBIOS_INCOMING_DATA_BUFFER_SIZE> incomingDataBuffer;
 			void processChar(unsigned char c);
 			void processCharISR(unsigned char c);
 			uint8_t availableBufferSpace();
