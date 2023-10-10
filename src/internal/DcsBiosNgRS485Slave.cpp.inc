@@ -109,6 +109,9 @@ namespace DcsBios {
 				if (rx_datatype == RXDATA_DCSBIOS_EXPORT) {
 					if (rxtx_len <= parser.incomingDataBuffer.availableForWrite()) {
 						parser.processCharISR(c);
+					} else {
+						last_rx_time = micros();
+						state = SYNC;
 					}
 				}
 				if (rxtx_len == 0) {
