@@ -30,9 +30,9 @@ namespace DcsBios {
 			volatile bool processingData;
 		public:
 			RingBuffer<DCSBIOS_INCOMING_DATA_BUFFER_SIZE> incomingDataBuffer;
+			
 			void processChar(unsigned char c);
 			void processCharISR(unsigned char c);
-			uint8_t availableBufferSpace();
 			ProtocolParser();
 	};
 }

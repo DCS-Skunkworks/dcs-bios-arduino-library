@@ -107,7 +107,7 @@ namespace DcsBios {
 			case RX_WAIT_DATA:
 				rxtx_len--;
 				if (rx_datatype == RXDATA_DCSBIOS_EXPORT) {
-					if (rxtx_len <= parser.availableBufferSpace()) {
+					if (rxtx_len <= parser.incomingDataBuffer.availableForWrite()) {
 						parser.processCharISR(c);
 					}
 				}

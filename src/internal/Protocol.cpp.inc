@@ -13,10 +13,6 @@ namespace DcsBios {
 		sync_byte_count = 0;
 	}
 
-	uint8_t ProtocolParser::availableBufferSpace() {
-		return incomingDataBuffer.availableForWrite();
-	}
-
 	/*
 		to be called from ISR
 		stores the character in a buffer, re-enables interrupts and processes the complete
