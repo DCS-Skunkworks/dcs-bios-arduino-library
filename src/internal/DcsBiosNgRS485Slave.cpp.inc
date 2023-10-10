@@ -243,13 +243,11 @@ namespace DcsBios {
 		PollingInput::pollInputs();
 		ExportStreamListener::loopAll();
 
-		#ifdef DCSBIOS_ALTERNATIVE_RS485_PROCESSING
 		// Process incoming data outside of ISR
 		if (!parser.incomingDataBuffer.isEmpty()) {
 			unsigned char nextByte = parser.incomingDataBuffer.get();
 			parser.processChar(nextByte);
 		}
-		#endif
 	}
 }
 #endif
