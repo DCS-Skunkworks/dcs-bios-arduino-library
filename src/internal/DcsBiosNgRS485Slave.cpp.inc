@@ -247,10 +247,12 @@ namespace DcsBios {
 		ExportStreamListener::loopAll();
 
 		// Process incoming data outside of ISR
+		#ifdef DCSBIOS_DEFER_RS485_PROCESSING
 		if (!parser.incomingDataBuffer.isEmpty()) {
 			unsigned char nextByte = parser.incomingDataBuffer.get();
 			parser.processChar(nextByte);
 		}
+		#endif
 	}
 }
 #endif
