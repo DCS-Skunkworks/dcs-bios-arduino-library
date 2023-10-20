@@ -1,5 +1,11 @@
 # DCS-BIOS Arduino Library
 
+## About this fork
+
+The DCSBIOSKit fork contains various fixes to the dcs-bios-arduino-library that have not yet made their way to the official [DCS-Skunkworks](https://github.com/DCS-Skunkworks/dcs-bios-arduino-library) fork.
+
+## What is DCS-BIOS?
+
 This is an Arduino library that makes it easy to write sketches that talk to DCS-BIOS.
 
 For more information and documentation, see the [DCS-BIOS FlightPanels Project](https://github.com/DCSFlightpanels).  The example "OneOfEverything" is a good place to start looking for controls to use.
