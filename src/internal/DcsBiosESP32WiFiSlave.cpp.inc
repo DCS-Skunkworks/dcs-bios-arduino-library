@@ -141,6 +141,7 @@ namespace DcsBios {
 				
 				connected = true;
 				lastReceivedTime = millis(); // Update last received time when connected
+				lastKeepAliveTime = millis();
 				setStatus(CONNECTED);
 			} else {
 				Serial.println("No services found");
@@ -191,6 +192,21 @@ namespace DcsBios {
 					setStatus(ASSOCIATED);
 					Serial.println("Connection timed out");
 				}
+			}
+
+			// Check if it's time to send a keep-alive message
+			if (connected && (millis() - lastKeepAliveTime >= keepAliveTimeout)) {
+				DynamicJsonDocument keepAliveJson(256);
+				keepAliveJson["keep-alive"] = slaveID;
+
+				String keepAliveOutput;
+				serializeJson(keepAliveJson, keepAliveOutput);
+				
+				Udp.beginPacket(master_ip, master_port);
+				Udp.write((uint8_t *)keepAliveOutput.c_str(), keepAliveOutput.length());
+				Udp.endPacket();
+
+				lastKeepAliveTime = millis();
 			}
 		}
 	}

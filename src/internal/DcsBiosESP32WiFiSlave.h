@@ -39,6 +39,8 @@ namespace DcsBios {
 
 		unsigned long lastReceivedTime = 0;
 		const unsigned long timeoutDuration = 1000;
+		unsigned long lastKeepAliveTime = 0;
+		const unsigned long keepAliveTimeout = 250;
 
 		const char* ssid = DCSBIOS_ESP32_WIFI_SSID;
 		const char* password = DCSBIOS_ESP32_WIFI_PASSWORD;
