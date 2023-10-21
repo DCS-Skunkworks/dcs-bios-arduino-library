@@ -51,6 +51,7 @@ namespace DcsBios {
 
 	void STM32WiFiSlave::begin() {
 		#ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
+		led = Adafruit_NeoPixel(1, DCSBIOS_ESP32_WIFI_NEOPIXEL, NEO_GRB + NEO_KHZ800);
 		led.begin();
 		#endif
 
