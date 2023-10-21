@@ -23,6 +23,7 @@ namespace DcsBios {
 	public:
 		void begin();
 		void loop();
+		void send(String message);
 
 		// Neopixel status LED
 		#ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
@@ -30,6 +31,8 @@ namespace DcsBios {
 		#endif
 	private:
 		WiFiUDP Udp;
+		IPAddress master_ip;
+		unsigned int master_port;
 		unsigned int localPort = 7779;
 
 		bool connected = false;
@@ -50,6 +53,7 @@ namespace DcsBios {
 
 		void setStatus(State state);
 		String base64_decode(String input);
+		String base64_encode(String input);
 	};
 }
 

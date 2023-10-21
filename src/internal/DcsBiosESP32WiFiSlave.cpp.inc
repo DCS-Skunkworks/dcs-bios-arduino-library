@@ -49,6 +49,50 @@ namespace DcsBios {
 		return decoded;
 	}
 
+	String STM32WiFiSlave::base64_encode(String input) {
+		const char base64Chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+		String result = "";
+		uint8_t temp[3];
+		uint8_t index;
+		size_t length = input.length();
+
+		for (size_t i = 0; i < length; i += 3) {
+			size_t remaining = length - i;
+
+			// Load up to three bytes of input into 'temp'
+			for (size_t j = 0; j < 3; ++j) {
+				if (i + j < length) {
+					temp[j] = input[i + j];
+				} else {
+					temp[j] = 0;
+				}
+			}
+
+			// Convert the three input bytes to four Base64 characters
+			index = (temp[0] & 0xFC) >> 2;
+			result += base64Chars[index];
+
+			index = ((temp[0] & 0x03) << 4) + ((temp[1] & 0xF0) >> 4);
+			result += base64Chars[index];
+
+			if (remaining > 1) {
+				index = ((temp[1] & 0x0F) << 2) + ((temp[2] & 0xC0) >> 6);
+				result += base64Chars[index];
+			} else {
+				result += '=';
+			}
+
+			if (remaining > 2) {
+				index = temp[2] & 0x3F;
+				result += base64Chars[index];
+			} else {
+				result += '=';
+			}
+		}
+
+		return result;
+	}
+
 	void STM32WiFiSlave::begin() {
 		#ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
 		led = Adafruit_NeoPixel(1, DCSBIOS_ESP32_WIFI_NEOPIXEL, NEO_GRB + NEO_KHZ800);
@@ -83,15 +127,15 @@ namespace DcsBios {
 			int n = MDNS.queryService("_dcs-bios", "_udp");
 
 			if (n > 0) {
-				IPAddress ip = MDNS.IP(0);
-				int port = MDNS.port(0);
+				master_ip = MDNS.IP(0);
+				master_port = MDNS.port(0);
 				
 				DynamicJsonDocument jsonDoc(1024);
 				jsonDoc["id"] = slaveID;
 				
 				String output;
 				serializeJson(jsonDoc, output);
-				Udp.beginPacket(ip, port);
+				Udp.beginPacket(master_ip, master_port);
 				Udp.write((uint8_t *)output.c_str(), output.length());
 				Udp.endPacket();
 				
@@ -151,6 +195,17 @@ namespace DcsBios {
 		}
 	}
 
+	void STM32WiFiSlave::send(String message) {
+		DynamicJsonDocument jsonDoc(1024);
+		jsonDoc["message"] = base64_encode(message);
+		
+		String output;
+		serializeJson(jsonDoc, output);
+		Udp.beginPacket(master_ip, master_port);
+		Udp.write((uint8_t *)output.c_str(), output.length());
+		Udp.endPacket();
+	}
+
 	STM32WiFiSlave wifiSlave;
 
 	void setup() {
@@ -164,8 +219,7 @@ namespace DcsBios {
 	}
 
 	bool tryToSendDcsBiosMessage(const char* msg, const char* arg) {
-		// TODO: Implement sending
-		//Serial.write(msg); Serial.write(' '); Serial.write(arg); Serial.write('\n');
+		wifiSlave.send(msg + String(' ') + arg + String('\n'));
 		
 		DcsBios::PollingInput::setMessageSentOrQueued();
 		return true;
