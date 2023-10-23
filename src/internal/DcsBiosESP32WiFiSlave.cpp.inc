@@ -153,12 +153,13 @@ namespace DcsBios {
 				DynamicJsonDocument incomingJson(1024);
 				deserializeJson(incomingJson, incomingPacket);
 
-				String message = incomingJson["message"].as<String>();
+				String type = incomingJson["type"].as<String>();
+				String data = incomingJson["data"].as<String>();
 
-				if (message == "Hello, World") {
+				if (type == "message") {
 					setStatus(RECEIVED);
-				} else {
-					String decodedMessage = base64_decode(message); // Assuming base64_decode returns a String
+
+					String decodedMessage = base64_decode(data); // Assuming base64_decode returns a String
 					String printableMessage = "";
 
 					for (unsigned int i = 0; i < decodedMessage.length(); ++i) {
@@ -179,6 +180,8 @@ namespace DcsBios {
 						char byte = decodedMessage[i];
 						parser.processChar(byte);
 					}
+				} else if (type == "check-in") {
+					Serial.println("Received check-in");
 				}
 			} else {
 				// Check for timeout
