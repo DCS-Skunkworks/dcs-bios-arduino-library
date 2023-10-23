@@ -132,14 +132,7 @@ namespace DcsBios {
 				master_ip = MDNS.IP(0);
 				master_port = MDNS.port(0);
 				
-				DynamicJsonDocument jsonDoc(1024);
-				jsonDoc["id"] = slaveID;
-				
-				String output;
-				serializeJson(jsonDoc, output);
-				Udp.beginPacket(master_ip, master_port);
-				Udp.write((uint8_t *)output.c_str(), output.length());
-				Udp.endPacket();
+				send("register");
 				
 				connected = true;
 				lastReceivedTime = millis(); // Update last received time when connected
@@ -198,24 +191,28 @@ namespace DcsBios {
 
 			// Check if it's time to send a keep-alive message
 			if (connected && (millis() - lastKeepAliveTime >= keepAliveTimeout)) {
-				DynamicJsonDocument keepAliveJson(256);
-				keepAliveJson["keep-alive"] = slaveID;
-
-				String keepAliveOutput;
-				serializeJson(keepAliveJson, keepAliveOutput);
-				
-				Udp.beginPacket(master_ip, master_port);
-				Udp.write((uint8_t *)keepAliveOutput.c_str(), keepAliveOutput.length());
-				Udp.endPacket();
+				send("check-in");
 
 				lastKeepAliveTime = millis();
 			}
 		}
 	}
 
-	void STM32WiFiSlave::send(String message) {
+	void STM32WiFiSlave::send(const char* type) {
+		send(type, "");
+	}
+
+	void STM32WiFiSlave::send(const char* type, String data = "") {
 		DynamicJsonDocument jsonDoc(1024);
-		jsonDoc["message"] = base64_encode(message);
+		jsonDoc["type"] = type;
+		jsonDoc["data"] = base64_encode(data);
+
+		JsonObject slave = jsonDoc.createNestedObject("slave");
+		slave["id"] = DCSBIOS_ESP32_WIFI_ID;
+		slave["mac"] = WiFi.macAddress();
+		slave["rssi"] = WiFi.RSSI();
+		slave["cpu_freq"] = ESP.getCpuFreqMHz();
+		slave["free_heap"] = ESP.getFreeHeap();
 		
 		String output;
 		serializeJson(jsonDoc, output);
@@ -237,7 +234,8 @@ namespace DcsBios {
 	}
 
 	bool tryToSendDcsBiosMessage(const char* msg, const char* arg) {
-		wifiSlave.send(msg + String(' ') + arg + String('\n'));
+		String data = msg + String(' ') + arg + String('\n');
+		wifiSlave.send("message", data);
 		
 		DcsBios::PollingInput::setMessageSentOrQueued();
 		return true;

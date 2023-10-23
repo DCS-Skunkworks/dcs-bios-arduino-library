@@ -23,7 +23,8 @@ namespace DcsBios {
 	public:
 		void begin();
 		void loop();
-		void send(String message);
+		void send(const char* type);
+		void send(const char* type, String data);
 
 		// Neopixel status LED
 		#ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
@@ -38,9 +39,9 @@ namespace DcsBios {
 		bool connected = false;
 
 		unsigned long lastReceivedTime = 0;
-		const unsigned long timeoutDuration = 1000;
+		const unsigned long timeoutDuration = 3000;
 		unsigned long lastKeepAliveTime = 0;
-		const unsigned long keepAliveTimeout = 250;
+		const unsigned long keepAliveTimeout = 1000;
 
 		const char* ssid = DCSBIOS_ESP32_WIFI_SSID;
 		const char* password = DCSBIOS_ESP32_WIFI_PASSWORD;
