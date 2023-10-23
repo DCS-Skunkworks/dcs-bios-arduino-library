@@ -21,6 +21,9 @@ namespace DcsBios {
 
 	class STM32WiFiSlave {
 	public:
+		unsigned long lastLoopTime = 0;
+		unsigned long lastLoopDuration = 0;
+
 		void begin();
 		void loop();
 		void send(const char* type);

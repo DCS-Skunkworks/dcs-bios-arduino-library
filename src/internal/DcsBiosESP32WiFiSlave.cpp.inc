@@ -211,8 +211,13 @@ namespace DcsBios {
 		slave["id"] = DCSBIOS_ESP32_WIFI_ID;
 		slave["mac"] = WiFi.macAddress();
 		slave["rssi"] = WiFi.RSSI();
-		slave["cpu_freq"] = ESP.getCpuFreqMHz();
 		slave["free_heap"] = ESP.getFreeHeap();
+		slave["loop_duration"] = lastLoopDuration;
+
+		if (type == "register") {
+			slave["cpu_freq"] = ESP.getCpuFreqMHz();
+			slave["flash_size"] = ESP.getFlashChipSize();
+		}
 		
 		String output;
 		serializeJson(jsonDoc, output);
@@ -230,7 +235,10 @@ namespace DcsBios {
 	void loop() {
 		wifiSlave.loop();
 		PollingInput::pollInputs();
-		ExportStreamListener::loopAll();			
+		ExportStreamListener::loopAll();
+
+		wifiSlave.lastLoopDuration = micros() - wifiSlave.lastLoopTime;
+		wifiSlave.lastLoopTime = micros();
 	}
 
 	bool tryToSendDcsBiosMessage(const char* msg, const char* arg) {
