@@ -5,16 +5,16 @@ namespace DcsBios {
 		#ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
 		switch(state) {
 			case OFFLINE:
-				led.setPixelColor(0, led.Color(4, 0, 0));
+				led.setPixelColor(0, led.Color(255, 0, 0));
 				break;
 			case ASSOCIATED:
-				led.setPixelColor(0, led.Color(4, 4, 0));
+				led.setPixelColor(0, led.Color(255, 255, 0));
 				break;
 			case CONNECTED:
-				led.setPixelColor(0, led.Color(0, 4, 0));
+				led.setPixelColor(0, led.Color(0, 255, 0));
 				break;
 			case RECEIVED:
-				led.setPixelColor(0, led.Color(0, 0, 4));
+				led.setPixelColor(0, led.Color(0, 0, 255));
 				break;
 		}
 
@@ -97,12 +97,14 @@ namespace DcsBios {
 		#ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
 		led = Adafruit_NeoPixel(1, DCSBIOS_ESP32_WIFI_NEOPIXEL, NEO_GRB + NEO_KHZ800);
 		led.begin();
+		led.setBrightness(2);
 		#endif
 
-		setStatus(OFFLINE);
 		Serial.begin(115200);
 		
 		WiFi.begin(ssid, password);
+		setStatus(OFFLINE);
+		
 		while (WiFi.status() != WL_CONNECTED) {
 			delay(3000);
 			Serial.println("Connecting to WiFi...");
