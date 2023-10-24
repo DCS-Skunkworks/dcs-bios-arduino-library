@@ -106,7 +106,7 @@ namespace DcsBios {
 		setStatus(OFFLINE);
 		
 		while (WiFi.status() != WL_CONNECTED) {
-			delay(3000);
+			delay(100);
 			Serial.println("Connecting to WiFi...");
 		}
 
@@ -130,9 +130,11 @@ namespace DcsBios {
 				master_ip = MDNS.IP(0);
 				master_port = MDNS.port(0);
 
-				while (!client.connected()) {
+				int tries = 0;
+				while (!client.connected() && tries < 5) {
 					Serial.println("Connecting to " + master_ip.toString() + ":" + master_port);
-					client.connect(master_ip, master_port, 1000);
+					client.connect(master_ip, master_port, 100);
+					tries++;
 				}
 
 				Serial.println("Socket is connected");
@@ -144,7 +146,7 @@ namespace DcsBios {
 				setStatus(CONNECTED);
 			} else {
 				Serial.println("No services found");
-				delay(3000);
+				delay(100);
 			}
 		} else {
 			int packetSize = client.available();
@@ -165,7 +167,7 @@ namespace DcsBios {
 					String decodedMessage = base64_decode(data); // Assuming base64_decode returns a String
 					String printableMessage = "";
 
-					for (unsigned int i = 0; i < decodedMessage.length(); ++i) {
+					/*for (unsigned int i = 0; i < decodedMessage.length(); ++i) {
 						char c = decodedMessage[i];
 						
 						// Check if the character is a printable ASCII character
@@ -177,7 +179,7 @@ namespace DcsBios {
 						}
 					}
 
-					Serial.println("Received message: " + printableMessage);
+					Serial.println("Received message: " + printableMessage);*/
 
 					for (unsigned int i = 0; i < decodedMessage.length(); ++i) {
 						char byte = decodedMessage[i];
@@ -208,7 +210,7 @@ namespace DcsBios {
 		send(type, "");
 	}
 
-	void STM32WiFiSlave::send(const char* type, String data = "") {
+	void STM32WiFiSlave::send(const char* type, String data) {
 		DynamicJsonDocument jsonDoc(1024);
 		jsonDoc["type"] = type;
 		jsonDoc["data"] = base64_encode(data);
