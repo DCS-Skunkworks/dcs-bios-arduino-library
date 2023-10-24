@@ -162,8 +162,6 @@ namespace DcsBios {
 				String data = incomingJson["data"].as<String>();
 
 				if (type == "message") {
-					setStatus(RECEIVED);
-
 					String decodedMessage = base64_decode(data); // Assuming base64_decode returns a String
 					String printableMessage = "";
 
