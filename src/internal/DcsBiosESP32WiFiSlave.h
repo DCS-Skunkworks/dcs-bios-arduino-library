@@ -10,7 +10,8 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
-#include <WiFiUdp.h>
+#include <WiFiClient.h>
+#include <WiFiServer.h>
 
 #ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
 #include <Adafruit_NeoPixel.h>
@@ -33,13 +34,12 @@ namespace DcsBios {
 		#ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
 		Adafruit_NeoPixel led;
 		#endif
+
+		WiFiClient client;
 	private:
-		WiFiUDP Udp;
 		IPAddress master_ip;
 		unsigned int master_port;
 		unsigned int localPort = 7779;
-
-		bool connected = false;
 
 		unsigned long lastReceivedTime = 0;
 		const unsigned long timeoutDuration = 3000;

@@ -119,22 +119,26 @@ namespace DcsBios {
 
 		Serial.println("mDNS responder started");
 
-		Udp.begin(localPort);
-
 		setStatus(ASSOCIATED);
 	}
 
 	void STM32WiFiSlave::loop() {
-		if (!connected) {
-			int n = MDNS.queryService("_dcs-bios", "_udp");
+		if (!client.connected()) {
+			int n = MDNS.queryService("_dcs-bios", "_tcp");
 
 			if (n > 0) {
 				master_ip = MDNS.IP(0);
 				master_port = MDNS.port(0);
+
+				while (!client.connected()) {
+					Serial.println("Connecting to " + master_ip.toString() + ":" + master_port);
+					client.connect(master_ip, master_port, 1000);
+				}
+
+				Serial.println("Socket is connected");
 				
 				send("register");
 				
-				connected = true;
 				lastReceivedTime = millis(); // Update last received time when connected
 				lastKeepAliveTime = millis();
 				setStatus(CONNECTED);
@@ -143,11 +147,12 @@ namespace DcsBios {
 				delay(3000);
 			}
 		} else {
-			int packetSize = Udp.parsePacket();
-			if (packetSize) {
+			int packetSize = client.available();
+
+			if (packetSize > 0) {
 				lastReceivedTime = millis(); // Update last received time
-				char incomingPacket[255];
-				int len = Udp.read(incomingPacket, 255);
+				uint8_t incomingPacket[packetSize];
+				int len = client.read(incomingPacket, packetSize);
 				incomingPacket[len] = '\0';
 				
 				DynamicJsonDocument incomingJson(1024);
@@ -186,14 +191,14 @@ namespace DcsBios {
 			} else {
 				// Check for timeout
 				if (millis() - lastReceivedTime > timeoutDuration) {
-					connected = false;
+					client.stop();
 					setStatus(ASSOCIATED);
 					Serial.println("Connection timed out");
 				}
 			}
 
 			// Check if it's time to send a keep-alive message
-			if (connected && (millis() - lastKeepAliveTime >= keepAliveTimeout)) {
+			if (client.connected() && (millis() - lastKeepAliveTime >= keepAliveTimeout)) {
 				send("check-in");
 
 				lastKeepAliveTime = millis();
@@ -224,9 +229,8 @@ namespace DcsBios {
 		
 		String output;
 		serializeJson(jsonDoc, output);
-		Udp.beginPacket(master_ip, master_port);
-		Udp.write((uint8_t *)output.c_str(), output.length());
-		Udp.endPacket();
+
+		client.write((uint8_t *)output.c_str(), output.length());		
 	}
 
 	STM32WiFiSlave wifiSlave;
