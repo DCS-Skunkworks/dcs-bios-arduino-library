@@ -12,6 +12,7 @@
 #include <ESPmDNS.h>
 #include <WiFiClient.h>
 #include <WiFiServer.h>
+#include <WiFiUDP.h>
 
 #ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
 #include <Adafruit_NeoPixel.h>
@@ -35,7 +36,11 @@ namespace DcsBios {
 		Adafruit_NeoPixel led;
 		#endif
 
+		#ifdef DCSBIOS_ESP32_WIFI_TCP
 		WiFiClient client;
+		#else
+		WiFiUDP client;
+		#endif
 	private:
 		IPAddress master_ip;
 		unsigned int master_port;
@@ -60,6 +65,9 @@ namespace DcsBios {
 		void setStatus(State state);
 		String base64_decode(String input);
 		String base64_encode(String input);
+
+		bool udp_connected;
+		bool connected();
 	};
 }
 

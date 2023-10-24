@@ -122,23 +122,39 @@ namespace DcsBios {
 		setStatus(ASSOCIATED);
 	}
 
+	bool STM32WiFiSlave::connected() {
+		#ifdef DCSBIOS_ESP32_WIFI_TCP
+		return client.connected();
+		#else
+		return udp_connected;
+		#endif
+	}
+
 	void STM32WiFiSlave::loop() {
-		if (!client.connected()) {
-			int n = MDNS.queryService("_dcs-bios", "_tcp");
+		if (!connected()) {
+			#ifdef DCSBIOS_ESP32_WIFI_TCP
+            int n = MDNS.queryService("_dcs-bios", "_tcp");
+            #else
+            int n = MDNS.queryService("_dcs-bios", "_udp");
+            #endif
 
 			if (n > 0) {
 				master_ip = MDNS.IP(0);
 				master_port = MDNS.port(0);
 
+				#ifdef DCSBIOS_ESP32_WIFI_TCP
 				int tries = 0;
-				while (!client.connected() && tries < 5) {
+				while (!connected() && tries < 5) {
 					Serial.println("Connecting to " + master_ip.toString() + ":" + master_port);
 					client.connect(master_ip, master_port, 100);
 					tries++;
 				}
-
 				Serial.println("Socket is connected");
-				
+				#else
+				client.begin(localPort);
+				udp_connected = true;
+				#endif
+
 				send("register");
 				
 				lastReceivedTime = millis(); // Update last received time when connected
@@ -149,13 +165,17 @@ namespace DcsBios {
 				delay(100);
 			}
 		} else {
-			int packetSize = client.available();
+			#ifdef DCSBIOS_ESP32_WIFI_TCP
+            int packetSize = client.available();
+            #else
+            int packetSize = client.parsePacket();
+            #endif
 
 			if (packetSize > 0) {
 				lastReceivedTime = millis(); // Update last received time
 				uint8_t incomingPacket[packetSize];
 				int len = client.read(incomingPacket, packetSize);
-				incomingPacket[len] = '\0';
+				//incomingPacket[len] = '\0';
 				
 				DynamicJsonDocument incomingJson(1024);
 				deserializeJson(incomingJson, incomingPacket);
@@ -191,14 +211,18 @@ namespace DcsBios {
 			} else {
 				// Check for timeout
 				if (millis() - lastReceivedTime > timeoutDuration) {
+					#ifdef DCSBIOS_ESP32_WIFI_TCP
 					client.stop();
+					#else
+					udp_connected = false;
+					#endif
 					setStatus(ASSOCIATED);
 					Serial.println("Connection timed out");
 				}
 			}
 
 			// Check if it's time to send a keep-alive message
-			if (client.connected() && (millis() - lastKeepAliveTime >= keepAliveTimeout)) {
+			if (connected() && (millis() - lastKeepAliveTime >= keepAliveTimeout)) {
 				send("check-in");
 
 				lastKeepAliveTime = millis();
@@ -230,7 +254,15 @@ namespace DcsBios {
 		String output;
 		serializeJson(jsonDoc, output);
 
-		client.write((uint8_t *)output.c_str(), output.length());		
+		#ifndef DCSBIOS_ESP32_WIFI_TCP
+		client.beginPacket(master_ip, master_port);
+		#endif
+
+		client.write((uint8_t *)output.c_str(), output.length());
+		
+		#ifndef DCSBIOS_ESP32_WIFI_TCP
+		client.endPacket();
+		#endif
 	}
 
 	STM32WiFiSlave wifiSlave;
