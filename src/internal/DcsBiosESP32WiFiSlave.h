@@ -42,6 +42,7 @@ namespace DcsBios {
 		WiFiUDP client;
 		#endif
 	private:
+		bool has_ip = false;
 		IPAddress master_ip;
 		unsigned int master_port;
 		unsigned int localPort = 7779;

@@ -97,7 +97,7 @@ namespace DcsBios {
 		#ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
 		led = Adafruit_NeoPixel(1, DCSBIOS_ESP32_WIFI_NEOPIXEL, NEO_GRB + NEO_KHZ800);
 		led.begin();
-		led.setBrightness(2);
+		led.setBrightness(8);
 		#endif
 
 		Serial.begin(115200);
@@ -112,13 +112,15 @@ namespace DcsBios {
 
 		Serial.println("Connected to " + WiFi.SSID() + " with IP " + WiFi.localIP().toString());
 
+		#ifdef DCSBIOS_ESP32_WIFI_TCP
 		if (!MDNS.begin("esp32_consumer")) {
 			Serial.println("Error starting mDNS");
 			return;
 		}
 
 		Serial.println("mDNS responder started");
-
+		#endif
+		
 		setStatus(ASSOCIATED);
 	}
 
@@ -135,12 +137,12 @@ namespace DcsBios {
 			#ifdef DCSBIOS_ESP32_WIFI_TCP
             int n = MDNS.queryService("_dcs-bios", "_tcp");
             #else
-            int n = MDNS.queryService("_dcs-bios", "_udp");
+            //int n = MDNS.queryService("_dcs-bios", "_udp");
             #endif
 
-			if (n > 0) {
-				master_ip = MDNS.IP(0);
-				master_port = MDNS.port(0);
+			//if (n > 0) {
+				//master_ip = MDNS.IP(0);
+				//master_port = MDNS.port(0);
 
 				#ifdef DCSBIOS_ESP32_WIFI_TCP
 				int tries = 0;
@@ -151,8 +153,15 @@ namespace DcsBios {
 				}
 				Serial.println("Socket is connected");
 				#else
-				client.begin(localPort);
-				udp_connected = true;
+				//client.begin(localPort);
+
+				if (client.beginMulticast(IPAddress(232, 0, 1, 3), localPort)) {
+					Serial.println("UDP Multicast listener started");
+					udp_connected = true;
+				} else {
+					Serial.println("UDP Multicast listener failed to start");
+					udp_connected = false;
+				}
 				#endif
 
 				send("register");
@@ -160,15 +169,18 @@ namespace DcsBios {
 				lastReceivedTime = millis(); // Update last received time when connected
 				lastKeepAliveTime = millis();
 				setStatus(CONNECTED);
-			} else {
+			/*} else {
 				Serial.println("No services found");
 				delay(100);
-			}
+			}*/
 		} else {
 			#ifdef DCSBIOS_ESP32_WIFI_TCP
             int packetSize = client.available();
             #else
             int packetSize = client.parsePacket();
+			has_ip = true;
+			master_ip = client.remoteIP();
+			master_port = client.remotePort();
             #endif
 
 			if (packetSize > 0) {
@@ -235,6 +247,12 @@ namespace DcsBios {
 	}
 
 	void STM32WiFiSlave::send(const char* type, String data) {
+		#ifndef DCSBIOS_ESP32_WIFI_TCP
+		if (!has_ip) {
+			return;
+		}
+		#endif
+
 		DynamicJsonDocument jsonDoc(1024);
 		jsonDoc["type"] = type;
 		jsonDoc["data"] = base64_encode(data);
