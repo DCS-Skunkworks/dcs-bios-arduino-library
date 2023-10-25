@@ -1,7 +1,7 @@
 #ifdef DCSBIOS_ESP32_WIFI
 
 namespace DcsBios {
-	void STM32WiFiSlave::begin() {
+	void ESP32WiFiSlave::begin() {
 		beginNeopixel();
 		Serial.begin(115200);
 		WiFi.begin(ssid, password);
@@ -26,7 +26,7 @@ namespace DcsBios {
 		setNeopixel(ASSOCIATED);
 	}
 
-	bool STM32WiFiSlave::connected() {
+	bool ESP32WiFiSlave::connected() {
 		#ifdef DCSBIOS_ESP32_WIFI_TCP
 		return client.connected();
 		#else
@@ -34,7 +34,7 @@ namespace DcsBios {
 		#endif
 	}
 
-	void STM32WiFiSlave::loop() {
+	void ESP32WiFiSlave::loop() {
 		#ifdef DCSBIOS_ESP32_WIFI_INSTRUMENTATION
 		lastLoopDuration = micros() - lastLoopTime;
 		lastLoopTime = micros();
@@ -145,11 +145,11 @@ namespace DcsBios {
 		}
 	}
 
-	void STM32WiFiSlave::send(const char* type) {
+	void ESP32WiFiSlave::send(const char* type) {
 		send(type, "");
 	}
 
-	void STM32WiFiSlave::send(const char* type, String data) {
+	void ESP32WiFiSlave::send(const char* type, String data) {
 		if (master_port == 0) {
 			return;
 		}
@@ -185,8 +185,6 @@ namespace DcsBios {
 		client.endPacket();
 		#endif
 	}
-
-	
 
 	void setup() {
 		wifiSlave.begin();

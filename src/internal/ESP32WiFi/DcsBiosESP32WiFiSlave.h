@@ -34,7 +34,7 @@
 namespace DcsBios {
 	ProtocolParser parser;
 
-	class STM32WiFiSlave {
+	class ESP32WiFiSlave {
 	public:
 		void begin();
 		void loop();
@@ -72,7 +72,7 @@ namespace DcsBios {
 		#endif
 	};
 
-	STM32WiFiSlave wifiSlave;
+	ESP32WiFiSlave wifiSlave;
 }
 
 #endif // DCSBIOS_ESP32_WIFI
