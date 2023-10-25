@@ -48,8 +48,8 @@ do not come with their own build system, we are just putting everything into the
 	#include "internal/DcsBiosNgRS485Slave.cpp.inc"
 #endif
 #ifdef DCSBIOS_ESP32_WIFI
-	#include "internal/DcsBiosESP32WiFiSlave.h"
-	#include "internal/DcsBiosESP32WiFiSlave.cpp.inc"
+	#include "internal/ESP32WiFi/DcsBiosESP32WiFiSlave.h"
+	#include "internal/ESP32WiFi/DcsBiosESP32WiFiSlave.cpp.inc"
 #endif
 #ifdef DCSBIOS_IRQ_SERIAL
 
