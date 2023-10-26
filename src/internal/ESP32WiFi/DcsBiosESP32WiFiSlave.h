@@ -20,10 +20,6 @@
 #define DCSBIOS_ESP32_WIFI_SERVICE "_dcs-bios", "_udp"
 #endif
 
-#ifndef DCSBIOS_ESP32_WIFI_MAX_RETRIES
-	#define DCSBIOS_ESP32_WIFI_MAX_RETRIES 0
-#endif
-
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
@@ -34,27 +30,17 @@
 
 #include "Utils.h"
 #include "Utils.cpp.inc"
-#include <deque>
 
 namespace DcsBios {
 	ProtocolParser parser;
-
-	class Message {
-	public:
-		unsigned int id;
-		unsigned int retries = 0;
-		const char* type;
-		String data;
-		unsigned long lastSentTime = 0;
-	};
 
 	class ESP32WiFiSlave {
 	public:
 		void begin();
 		void loop();
-		void enqueue(const char* type);
-		void enqueue(const char* type, String data);
-		
+		void send(const char* type);
+		void send(const char* type, String data);
+
 		#ifdef DCSBIOS_ESP32_WIFI_TCP
 		WiFiClient client;
 		#else
@@ -64,9 +50,6 @@ namespace DcsBios {
 		IPAddress master_ip = IPAddress(0, 0, 0, 0);
 		unsigned int master_port = 0;
 
-		void send(const char* type);
-		void send(const char* type, String data, unsigned int seq);
-
 		unsigned long lastReceivedTime = 0;
 		const unsigned long timeoutDuration = 3000;
 		unsigned long lastKeepAliveTime = 0;
@@ -74,9 +57,6 @@ namespace DcsBios {
 
 		const char* ssid = DCSBIOS_ESP32_WIFI_SSID;
 		const char* password = DCSBIOS_ESP32_WIFI_PASSWORD;
-
-		unsigned int last_message_id = 0;
-		std::deque<Message> messages;
 
 		bool udp_ready;
 		bool connected();
