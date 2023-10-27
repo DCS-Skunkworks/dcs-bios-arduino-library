@@ -21,7 +21,7 @@
 #endif
 
 #ifndef DCSBIOS_ESP32_WIFI_MAX_RETRIES
-	#define DCSBIOS_ESP32_WIFI_MAX_RETRIES 0
+	#define DCSBIOS_ESP32_WIFI_MAX_RETRIES 3
 #endif
 
 #include <Arduino.h>

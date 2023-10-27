@@ -130,12 +130,11 @@ namespace DcsBios {
 				} else if (type == "ack") {
 					String id = incomingJson["id"].as<String>();
 					unsigned int seq = incomingJson["seq"].as<unsigned int>();
-					
-					if (id == DCSBIOS_ESP32_WIFI) {
-						//Serial.println("Received ack for message " + String(seq));
 
+					if (id == DCSBIOS_ESP32_WIFI) {
 						for (auto message = messages.begin(); message != messages.end(); /* empty */) {
 							if (message->id == seq) {
+								// Serial.println("Received ack for message " + String(seq) + " after " + String(millis() - message->lastSentTime) + "ms");
 								message = messages.erase(message);
 								//Serial.println("Removed message with seq: " + String(seq));
 								break;  // Exit the loop as the message has been found and removed
@@ -144,6 +143,16 @@ namespace DcsBios {
 							}
 						}
 					}
+				} else if (type == "restart") {
+					String id = incomingJson["id"].as<String>();
+					
+					if (id == DCSBIOS_ESP32_WIFI) {
+						Serial.println("Kthxbai!");
+						ESP.restart();
+					}
+				} else if (type == "restart-all") {
+					Serial.println("Kthxbai!");
+					ESP.restart();
 				} else {
 					Serial.println("Unknown message type: " + type);
 				}
@@ -171,9 +180,9 @@ namespace DcsBios {
 			for (auto message = messages.begin(); message != messages.end(); /* empty */) {
 				if (message->retries > DCSBIOS_ESP32_WIFI_MAX_RETRIES) {
 					message = messages.erase(message);
-					//Serial.println("Giving up on message " + String(message->id));
-				} else if (millis() - message->lastSentTime > 2000) {
-					Serial.println("Sending message with id " + String(message->id) + " and type " + String(message->type) + " retry: " + String(message->retries));
+					// Serial.println("Giving up on message " + String(message->id));
+				} else if (millis() - message->lastSentTime > 250) {
+					// Serial.println("Sending message with id " + String(message->id) + " and type " + String(message->type) + " retry: " + String(message->retries));
 					send(message->type, message->data, message->id);
 					message->retries++;
 					message->lastSentTime = millis();
