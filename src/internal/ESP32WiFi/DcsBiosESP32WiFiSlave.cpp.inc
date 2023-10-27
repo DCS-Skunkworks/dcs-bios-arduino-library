@@ -8,7 +8,7 @@ namespace DcsBios {
 		setNeopixel(OFFLINE);
 		
 		while (WiFi.status() != WL_CONNECTED) {
-			delay(100);
+			delay(500);
 			Serial.println("Connecting to WiFi...");
 		}
 
@@ -107,8 +107,13 @@ namespace DcsBios {
 				uint8_t incomingPacket[packetSize];
 				int len = client.read(incomingPacket, packetSize);
 				
-				DynamicJsonDocument incomingJson(packetSize);
-				deserializeJson(incomingJson, incomingPacket);
+				DynamicJsonDocument incomingJson(packetSize*2);
+				DeserializationError error = deserializeJson(incomingJson, incomingPacket);
+
+				if (error) {
+					Serial.print(F("deserializeJson() failed: "));
+					Serial.println(error.c_str());
+				}
 
 				String type = incomingJson["type"].as<String>();
 				String data = incomingJson["data"].as<String>();
@@ -122,6 +127,25 @@ namespace DcsBios {
 					}
 				} else if (type == "check-in") {
 					Serial.println("Received check-in");
+				} else if (type == "ack") {
+					String id = incomingJson["id"].as<String>();
+					unsigned int seq = incomingJson["seq"].as<unsigned int>();
+					
+					if (id == DCSBIOS_ESP32_WIFI) {
+						//Serial.println("Received ack for message " + String(seq));
+
+						for (auto message = messages.begin(); message != messages.end(); /* empty */) {
+							if (message->id == seq) {
+								message = messages.erase(message);
+								//Serial.println("Removed message with seq: " + String(seq));
+								break;  // Exit the loop as the message has been found and removed
+							} else {
+								++message;
+							}
+						}
+					}
+				} else {
+					Serial.println("Unknown message type: " + type);
 				}
 			} else {
 				// Check for timeout
@@ -142,14 +166,43 @@ namespace DcsBios {
 
 				lastKeepAliveTime = millis();
 			}
+
+			// Send enqueued messages
+			for (auto message = messages.begin(); message != messages.end(); /* empty */) {
+				if (message->retries > DCSBIOS_ESP32_WIFI_MAX_RETRIES) {
+					message = messages.erase(message);
+					//Serial.println("Giving up on message " + String(message->id));
+				} else if (millis() - message->lastSentTime > 2000) {
+					Serial.println("Sending message with id " + String(message->id) + " and type " + String(message->type) + " retry: " + String(message->retries));
+					send(message->type, message->data, message->id);
+					message->retries++;
+					message->lastSentTime = millis();
+					++message;
+				} else {
+					++message;
+				}
+			}
 		}
 	}
 
-	void ESP32WiFiSlave::send(const char* type) {
-		send(type, "");
+	void ESP32WiFiSlave::enqueue(const char* type) {
+		enqueue(type, "");
 	}
 
-	void ESP32WiFiSlave::send(const char* type, String data) {
+	void ESP32WiFiSlave::enqueue(const char* type, String data) {
+		Message message;
+		message.id = last_message_id++;
+		message.type = type;
+		message.data = data;
+		messages.push_back(message);
+		Serial.println("Enqueued " + String(type) + " with id " + String(message.id));
+	}
+
+	void ESP32WiFiSlave::send(const char* type) {
+		send(type, "", 0);
+	}
+
+	void ESP32WiFiSlave::send(const char* type, String data, unsigned int seq) {
 		if (master_port == 0) {
 			return;
 		}
@@ -157,6 +210,7 @@ namespace DcsBios {
 		DynamicJsonDocument jsonDoc(1024);
 		jsonDoc["type"] = type;
 		jsonDoc["data"] = base64_encode(data);
+		jsonDoc["seq"] = seq;
 
 		JsonObject slave = jsonDoc.createNestedObject("slave");
 		slave["id"] = DCSBIOS_ESP32_WIFI;
@@ -198,7 +252,7 @@ namespace DcsBios {
 
 	bool tryToSendDcsBiosMessage(const char* msg, const char* arg) {
 		String data = msg + String(' ') + arg + String('\n');
-		wifiSlave.send("message", data);
+		wifiSlave.enqueue("message", data);
 		
 		DcsBios::PollingInput::setMessageSentOrQueued();
 		return true;
