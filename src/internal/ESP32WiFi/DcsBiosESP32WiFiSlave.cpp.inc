@@ -1,5 +1,8 @@
 #ifdef DCSBIOS_ESP32_WIFI
 
+#include <pb_decode.h>
+#include "SlaveMessage.pb.h"
+
 namespace DcsBios {
 	void ESP32WiFiSlave::begin() {
 		beginNeopixel();
@@ -13,6 +16,9 @@ namespace DcsBios {
 		}
 
 		Serial.println("Connected to " + WiFi.SSID() + " with IP " + WiFi.localIP().toString());
+
+		multicast_client = new DcsBiosESP32MulticastClient();
+		multicast_client->start();
 
 		#ifndef DCSBIOS_ESP32_WIFI_MULTICAST
 		if (!MDNS.begin("esp32_consumer")) {
@@ -35,6 +41,22 @@ namespace DcsBios {
 	}
 
 	void ESP32WiFiSlave::loop() {
+		OutputMessage receivedMessage;
+
+		// Attempt to dequeue a message
+		if (multicast_client->dequeue(receivedMessage, 0)) {
+			// Successfully dequeued a message, process it
+			Serial.println("Successfully dequeued a message");
+
+			// Assuming data is a String field in OutputMessage
+			for (unsigned int i = 0; i < receivedMessage.length; ++i) {
+				char byte = receivedMessage.data[i];
+				parser.processChar(byte);
+			}
+		}
+
+		return;
+
 		#ifdef DCSBIOS_ESP32_WIFI_INSTRUMENTATION
 		lastLoopDuration = micros() - lastLoopTime;
 		lastLoopTime = micros();
@@ -105,9 +127,35 @@ namespace DcsBios {
 			if (packetSize > 0) {
 				lastReceivedTime = millis();
 				uint8_t incomingPacket[packetSize];
-				int len = client.read(incomingPacket, packetSize);
+				size_t len = client.read(incomingPacket, packetSize);
+
+				// Set up the Nanopb stream
+				pb_istream_t stream = pb_istream_from_buffer(incomingPacket, len);
+
+				// Allocate a buffer to hold the decoded data.
+				DataBuffer localDataBuffer = { {0}, 0 }; // Initialize buffer and size
 				
-				DynamicJsonDocument incomingJson(packetSize*2);
+				// Prepare for decoding
+				SlaveMessage slaveMessage = SlaveMessage_init_zero;
+				slaveMessage.data.funcs.decode = &decode_bytes;
+				slaveMessage.data.arg = &localDataBuffer;
+
+				// Decode the message
+				if (pb_decode(&stream, SlaveMessage_fields, &slaveMessage)) {
+					// Successfully decoded
+					Serial.println("Successfully decoded message");
+
+					// Now the 'localDataBuffer' contains the data and its size
+					for (size_t i = 0; i < localDataBuffer.size; ++i) {
+						uint8_t byte = localDataBuffer.buffer[i];
+						parser.processChar(byte);
+					}
+				} else {
+					// Decode failed
+					Serial.println("Decode failed");
+				}
+				
+				/*DynamicJsonDocument incomingJson(packetSize*2);
 				DeserializationError error = deserializeJson(incomingJson, incomingPacket);
 
 				if (error) {
@@ -132,7 +180,7 @@ namespace DcsBios {
 					unsigned int seq = incomingJson["seq"].as<unsigned int>();
 
 					if (id == DCSBIOS_ESP32_WIFI) {
-						for (auto message = messages.begin(); message != messages.end(); /* empty */) {
+						for (auto message = messages.begin(); message != messages.end();) {
 							if (message->id == seq) {
 								// Serial.println("Received ack for message " + String(seq) + " after " + String(millis() - message->lastSentTime) + "ms");
 								message = messages.erase(message);
@@ -155,7 +203,7 @@ namespace DcsBios {
 					ESP.restart();
 				} else {
 					Serial.println("Unknown message type: " + type);
-				}
+				}*/
 			} else {
 				// Check for timeout
 				if (millis() - lastReceivedTime > timeoutDuration) {
@@ -192,6 +240,22 @@ namespace DcsBios {
 				}
 			}
 		}
+	}
+
+	// Callback function to handle the 'data' field
+	bool ESP32WiFiSlave::decode_bytes(pb_istream_t *stream, const pb_field_t *field, void **arg) {
+		DataBuffer *dataBuffer = (DataBuffer *)(*arg);
+		dataBuffer->size = stream->bytes_left; // Set the size
+		
+		if (dataBuffer->size > sizeof(dataBuffer->buffer)) {
+			return false;
+		}
+		
+		if (!pb_read(stream, dataBuffer->buffer, dataBuffer->size)) {
+			return false;
+		}
+		
+		return true;
 	}
 
 	void ESP32WiFiSlave::enqueue(const char* type) {

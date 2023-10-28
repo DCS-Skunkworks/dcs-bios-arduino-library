@@ -35,6 +35,7 @@
 #include "Utils.h"
 #include "Utils.cpp.inc"
 #include <deque>
+#include <pb_decode.h>
 
 namespace DcsBios {
 	ProtocolParser parser;
@@ -46,6 +47,11 @@ namespace DcsBios {
 		const char* type;
 		String data;
 		unsigned long lastSentTime = 0;
+	};
+
+	struct DataBuffer {
+		uint8_t buffer[256];
+		size_t size;
 	};
 
 	class ESP32WiFiSlave {
@@ -61,6 +67,8 @@ namespace DcsBios {
 		WiFiUDP client;
 		#endif
 	private:
+		ClientInterface* multicast_client;
+
 		IPAddress master_ip = IPAddress(0, 0, 0, 0);
 		unsigned int master_port = 0;
 
@@ -74,6 +82,8 @@ namespace DcsBios {
 
 		const char* ssid = DCSBIOS_ESP32_WIFI_SSID;
 		const char* password = DCSBIOS_ESP32_WIFI_PASSWORD;
+
+		static bool decode_bytes(pb_istream_t *stream, const pb_field_t *field, void **arg);
 
 		unsigned int last_message_id = 0;
 		std::deque<Message> messages;
