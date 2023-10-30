@@ -14,7 +14,6 @@ namespace DcsBios {
         uint16_t master_port;
 
         std::deque<Message> &receive_queue;
-        bool listening;
 
         uint32_t expected_length = 0;
         std::vector<unsigned char> buffer;
@@ -53,7 +52,7 @@ namespace DcsBios {
         }
 
     public:
-        DcsBiosESP32TCPClient(std::deque<Message> &receive_queue) : receive_queue(receive_queue), listening(false), master_port(0) {}
+        DcsBiosESP32TCPClient(std::deque<Message> &receive_queue) : receive_queue(receive_queue), master_port(0) {}
 
         bool start() {
             tcpClient.onData([](void* arg, AsyncClient* client, void* data, size_t len) {
@@ -61,32 +60,34 @@ namespace DcsBios {
             }, this);
 
             if (tcpClient.connect(master_ip, master_port)) {
-                listening = true;
                 Serial.println("TCP client started.");
+
                 return true;
             }
 
             Serial.println("TCP client failed to start.");
+
             return false;
         }
 
         void stop() {
-            listening = false;
             tcpClient.close();
         }
 
         void loop() {}
 
         bool connected() {
-            return listening;
+            return tcpClient.connected();
         }
 
         bool discover() {
             int n = MDNS.queryService("_dcs-bios", "_tcp");
 
+            // TODO: Give up after x tries and restart
             if (n > 0) {
                 master_ip = MDNS.IP(0);
                 master_port = MDNS.port(0);
+
                 return true;
             }
 
