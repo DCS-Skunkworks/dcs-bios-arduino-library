@@ -35,12 +35,14 @@ namespace DcsBios {
             size_t bytes_left = stream->bytes_left;
 
             if (bytes_left > 0) {
-                char *tempBuffer = new char[bytes_left];
+                char *tempBuffer = new char[bytes_left + 1];
 
                 if (!pb_read(stream, (pb_byte_t *)tempBuffer, bytes_left)) {
                     delete[] tempBuffer;
                     return false;
                 }
+
+                tempBuffer[bytes_left] = '\0';
 
                 // Append the bytes to the Arduino String
                 *resultString += String(tempBuffer);

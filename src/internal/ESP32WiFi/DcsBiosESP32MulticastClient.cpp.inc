@@ -13,15 +13,14 @@ namespace DcsBios {
 		unsigned int master_port = 0;
 
         bool listening = false;
-        std::deque<Message> receive_queue;
+        std::deque<Message> &receive_queue;
     public:
         DcsBiosESP32MulticastClient(std::deque<Message> &receive_queue) : receive_queue(receive_queue) {}
 
         bool start() {
             if (udp.listenMulticast(DCSBIOS_ESP32_WIFI_MULTICAST_GROUP, DCSBIOS_ESP32_WIFI_LOCAL_PORT)) {
-                listening = true;
-                
                 Serial.println("Multicast listener started.");
+                listening = true;
 
                 udp.onPacket([this](AsyncUDPPacket packet) {
                     Message message = Message(packet);
@@ -45,6 +44,8 @@ namespace DcsBios {
         void stop() {
             listening = false;
             udp.close();
+            master_ip = IPAddress(0, 0, 0, 0);
+            master_port = 0;
         }
 
         void loop() {}
@@ -54,13 +55,17 @@ namespace DcsBios {
             return listening;
         }
 
+        bool can_send() {
+            return master_port != 0;
+        }
+
         // Service discovery for multicast is not required. Always return true
         bool discover() {
             return true;
         }
 
         bool send(Message &message) {
-            if (master_port == 0) { return false; }
+            if (can_send()) { return false; }
 
             std::vector<unsigned char> encoded;
             message.encodeToVector(encoded);

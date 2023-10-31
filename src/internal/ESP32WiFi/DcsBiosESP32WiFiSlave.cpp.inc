@@ -105,6 +105,8 @@ namespace DcsBios {
 					Serial.println("Restarting on Nexus request.");
 					ESP.restart();
 				}
+
+				message = receive_queue.erase(message);
 			}
 
 			// Check for time-out.
@@ -115,7 +117,7 @@ namespace DcsBios {
 			}
 
 			// Send check-in
-			if (millis() - lastKeepAliveTime >= DCSBIOS_ESP32_WIFI_KEEPALIVE_PERIOD) {
+			if (client->can_send() && (millis() - lastKeepAliveTime >= DCSBIOS_ESP32_WIFI_KEEPALIVE_PERIOD)) {
 				enqueue("check-in");
 
 				lastKeepAliveTime = millis();
