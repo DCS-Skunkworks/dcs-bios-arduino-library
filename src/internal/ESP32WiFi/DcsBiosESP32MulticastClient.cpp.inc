@@ -72,7 +72,7 @@ namespace DcsBios {
 
             size_t sent = udp.writeTo((uint8_t *)encoded.data(), encoded.size(), master_ip, master_port);
 
-            Serial.println("Sent " + String(sent) + " of " + encoded.size() + " bytes to " + master_ip.toString() + ":" + String(master_port));
+            // Serial.println("Sent " + String(sent) + " of " + encoded.size() + " bytes to " + master_ip.toString() + ":" + String(master_port));
 
             return sent == encoded.size();
         }

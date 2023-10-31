@@ -132,7 +132,7 @@ namespace DcsBios {
 				}
 
 				if (message.retries >= DCSBIOS_ESP32_WIFI_SEND_RETRIES) {
-					Serial.println("Reached maximum retries for " + String(message.seq) + " after " + String(message.retries) + " retries.");
+					// Serial.println("Reached maximum retries for " + String(message.seq) + " after " + String(message.retries) + " retries.");
 					
 					return true; // Remove this message from send_queue
 				} 

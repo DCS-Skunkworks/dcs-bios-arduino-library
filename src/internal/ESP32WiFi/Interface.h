@@ -13,6 +13,7 @@ namespace DcsBios {
         // Discover services, returns success or failure as bool
         virtual bool discover() = 0;
 
+        // Check if a message can be sent
         virtual bool can_send() = 0;
 
         // Send Message
