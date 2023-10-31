@@ -93,7 +93,7 @@ namespace DcsBios {
 				} else if (message.type == "check-in") { // Nexus is checking in, nothing to do. lastReceivedTime is automatically updated at the top of this function.
 					Serial.println("Received check-in");
 				} else if (message.type == "ack") { // Nexus has acknowledged a message, remove it from the send_queue.
-
+					Serial.println("Received ack for " + String(message.seq));
 					send_queue.for_each_remove_if([&](Message& queued_packet) -> bool {
 						if (message.slave_details.id == DCSBIOS_ESP32_WIFI && queued_packet.seq == message.seq) {
 							return true; // Remove this packet from send_queue
@@ -125,14 +125,18 @@ namespace DcsBios {
 			
 			// Send enqueued data
 			send_queue.for_each_remove_if([&](Message& message) -> bool {
-				if (message.retries > DCSBIOS_ESP32_WIFI_SEND_RETRIES) {
-					Serial.println("Giving up on message " + String(message.seq) + " after " + String(message.retries) + " retries.");
-					return true; // Remove this message from send_queue
-				} else if (millis() - message.lastSentTime > DCSBIOS_ESP32_WIFI_SEND_RETRY_DELAY) {
+				if (millis() - message.lastSentTime > DCSBIOS_ESP32_WIFI_SEND_RETRY_DELAY) {
 					client->send(message);
 					message.retries++;
 					message.lastSentTime = millis();
 				}
+
+				if (message.retries >= DCSBIOS_ESP32_WIFI_SEND_RETRIES) {
+					Serial.println("Reached maximum retries for " + String(message.seq) + " after " + String(message.retries) + " retries.");
+					
+					return true; // Remove this message from send_queue
+				} 
+
 				return false; // Do not remove this message from send_queue
 			});
 		}
@@ -144,6 +148,19 @@ namespace DcsBios {
 
 	void ESP32WiFiSlave::enqueue(const char* type, String data) {
 		Message message(type, data, ++last_message_id);
+
+		message.slave_details.id = DCSBIOS_ESP32_WIFI;
+
+		if (message.type == "check-in") {
+			message.slave_details.mac = WiFi.macAddress();
+			message.slave_details.rssi = WiFi.RSSI();
+			message.slave_details.loop_duration = lastLoopDuration;
+			message.slave_details.free_heap = ESP.getFreeHeap();
+			message.slave_details.cpu_freq = ESP.getCpuFreqMHz();
+			message.slave_details.flash_size = ESP.getFlashChipSize();
+			message.retries = DCSBIOS_ESP32_WIFI_SEND_RETRIES; // Check-in messages are not important, so we set retries to the maximum to prevent them from being retried.
+		}
+
 		send_queue.push_back(message);
 
 		Serial.println("Enqueued " + String(type) + " with id " + String(message.seq));

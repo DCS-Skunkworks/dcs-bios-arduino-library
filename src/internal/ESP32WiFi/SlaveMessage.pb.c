@@ -9,7 +9,4 @@
 PB_BIND(SlaveMessage, SlaveMessage, AUTO)
 
 
-PB_BIND(SlaveDetails, SlaveDetails, AUTO)
-
-
 

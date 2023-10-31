@@ -28,7 +28,7 @@ namespace DcsBios {
                     // Set master IP and port if not set
                     if (master_port == 0) {
                         master_ip = packet.remoteIP();
-                        master_port = packet.remotePort();
+                        master_port = DCSBIOS_ESP32_WIFI_LOCAL_PORT;
 
                         Serial.print("Master IP: " + master_ip.toString() + " Port: " + String(master_port));
                     }
@@ -44,7 +44,6 @@ namespace DcsBios {
 
         void stop() {
             listening = false;
-            udp.close();
             master_ip = IPAddress(0, 0, 0, 0);
             master_port = 0;
         }
@@ -66,14 +65,14 @@ namespace DcsBios {
         }
 
         bool send(Message &message) {
-            if (can_send()) { return false; }
+            if (!can_send()) { return false; }
 
-            std::vector<unsigned char> encoded;
+            std::vector<unsigned char> encoded(256);
             message.encodeToVector(encoded);
 
             size_t sent = udp.writeTo((uint8_t *)encoded.data(), encoded.size(), master_ip, master_port);
 
-            Serial.println("Sent " + String(sent) + " bytes to " + master_ip.toString() + ":" + String(master_port));
+            Serial.println("Sent " + String(sent) + " of " + encoded.size() + " bytes to " + master_ip.toString() + ":" + String(master_port));
 
             return sent == encoded.size();
         }
