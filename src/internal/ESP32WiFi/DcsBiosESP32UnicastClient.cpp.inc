@@ -1,6 +1,5 @@
 #ifdef DCSBIOS_ESP32_WIFI
 
-#include <deque>
 #include <Arduino.h>
 #include <AsyncUDP.h>
 #include <ESPmDNS.h>
@@ -13,10 +12,10 @@ namespace DcsBios {
         IPAddress master_ip;
         uint16_t master_port;
 
-        std::deque<Message> &receive_queue;
+        ThreadSafeDeque<Message> &receive_queue;
         bool listening;
     public:
-        DcsBiosESP32UnicastClient(std::deque<Message> &receive_queue) : receive_queue(receive_queue), listening(false), master_port(0) {}
+        DcsBiosESP32UnicastClient(ThreadSafeDeque<Message> &receive_queue) : receive_queue(receive_queue), listening(false), master_port(0) {}
 
         bool start() {
             if (udp.listen(DCSBIOS_ESP32_WIFI_LOCAL_PORT)) {

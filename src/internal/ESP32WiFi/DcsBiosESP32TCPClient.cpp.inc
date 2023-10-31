@@ -1,6 +1,5 @@
 #ifdef DCSBIOS_ESP32_WIFI
 
-#include <deque>
 #include <Arduino.h>
 #include <AsyncTCP.h>
 #include <ESPmDNS.h>
@@ -13,7 +12,7 @@ namespace DcsBios {
         IPAddress master_ip;
         uint16_t master_port;
 
-        std::deque<Message> &receive_queue;
+        ThreadSafeDeque<Message> &receive_queue;
 
         uint32_t expected_length = 0;
         std::vector<unsigned char> buffer;
@@ -52,7 +51,7 @@ namespace DcsBios {
         }
 
     public:
-        DcsBiosESP32TCPClient(std::deque<Message> &receive_queue) : receive_queue(receive_queue), master_port(0) {}
+        DcsBiosESP32TCPClient(ThreadSafeDeque<Message> &receive_queue) : receive_queue(receive_queue), master_port(0) {}
 
         bool start() {
             tcpClient.onData([](void* arg, AsyncClient* client, void* data, size_t len) {

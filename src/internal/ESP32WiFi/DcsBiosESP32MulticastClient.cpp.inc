@@ -1,6 +1,5 @@
 #ifdef DCSBIOS_ESP32_WIFI
 
-#include <deque>
 #include <Arduino.h>
 #include <AsyncUDP.h>
 
@@ -13,9 +12,9 @@ namespace DcsBios {
 		unsigned int master_port = 0;
 
         bool listening = false;
-        std::deque<Message> &receive_queue;
+        ThreadSafeDeque<Message> &receive_queue;
     public:
-        DcsBiosESP32MulticastClient(std::deque<Message> &receive_queue) : receive_queue(receive_queue) {}
+        DcsBiosESP32MulticastClient(ThreadSafeDeque<Message> &receive_queue) : receive_queue(receive_queue) {}
 
         bool start() {
             if (udp.listenMulticast(DCSBIOS_ESP32_WIFI_MULTICAST_GROUP, DCSBIOS_ESP32_WIFI_LOCAL_PORT)) {
@@ -30,6 +29,8 @@ namespace DcsBios {
                     if (master_port == 0) {
                         master_ip = packet.remoteIP();
                         master_port = packet.remotePort();
+
+                        Serial.print("Master IP: " + master_ip.toString() + " Port: " + String(master_port));
                     }
                 });
 
@@ -71,6 +72,8 @@ namespace DcsBios {
             message.encodeToVector(encoded);
 
             size_t sent = udp.writeTo((uint8_t *)encoded.data(), encoded.size(), master_ip, master_port);
+
+            Serial.println("Sent " + String(sent) + " bytes to " + master_ip.toString() + ":" + String(master_port));
 
             return sent == encoded.size();
         }

@@ -2,7 +2,6 @@
 #define _DCSBIOS_ESP32_WIFI_H_
 #ifdef DCSBIOS_ESP32_WIFI
 
-#include <deque>
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
@@ -32,8 +31,8 @@ namespace DcsBios {
 		unsigned long lastKeepAliveTime = 0;
 
 		unsigned int last_message_id = 0;
-		std::deque<Message> receive_queue;
-		std::deque<Message> send_queue;
+		ThreadSafeDeque<Message> receive_queue;
+		ThreadSafeDeque<Message> send_queue;
 
 		// Performance Instrumentation
 		#ifdef DCSBIOS_ESP32_WIFI_INSTRUMENTATION

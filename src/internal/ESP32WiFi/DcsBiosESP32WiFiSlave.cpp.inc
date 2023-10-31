@@ -83,31 +83,31 @@ namespace DcsBios {
 			}
 		} else { // If connected
 			// Check if there are messages to process
-			for (auto message = receive_queue.begin(); message != receive_queue.end();) {
+			receive_queue.for_each_remove_if([&](Message& message) -> bool {
 				lastReceivedTime = millis();
 
-				if (message->type == "message") { // This is a DCS-BIOS message that needs to be forwarded to the parser
-					for (unsigned char c: message->data) {
+				if (message.type == "message") { // This is a DCS-BIOS message that needs to be forwarded to the parser
+					for (unsigned char c : message.data) {
 						parser.processChar(c);
 					}
-				} else if (message->type == "check-in") { // Nexus is checking in, nothing to do. lastReceivedTime is automatically updated at the top of this function.
+				} else if (message.type == "check-in") { // Nexus is checking in, nothing to do. lastReceivedTime is automatically updated at the top of this function.
 					Serial.println("Received check-in");
-				} else if (message->type == "ack") { // Nexus has acknowledged a message, remove it from the send_queue.
-					for (auto queued_packet = send_queue.begin(); queued_packet != send_queue.end();) {
-						if (message->slave_details.id == DCSBIOS_ESP32_WIFI && queued_packet->seq == message->seq) {
-							queued_packet = send_queue.erase(queued_packet);
-							break;
-						} else {
-							++queued_packet;
+				} else if (message.type == "ack") { // Nexus has acknowledged a message, remove it from the send_queue.
+
+					send_queue.for_each_remove_if([&](Message& queued_packet) -> bool {
+						if (message.slave_details.id == DCSBIOS_ESP32_WIFI && queued_packet.seq == message.seq) {
+							return true; // Remove this packet from send_queue
 						}
-					}
-				} else if ((message->type == "restart" && message->slave_details.id == DCSBIOS_ESP32_WIFI) || message->type == "restart-all") { // Restart command.
+						return false; // Do not remove this packet from send_queue
+					});
+
+				} else if ((message.type == "restart" && message.slave_details.id == DCSBIOS_ESP32_WIFI) || message.type == "restart-all") { // Restart command.
 					Serial.println("Restarting on Nexus request.");
 					ESP.restart();
 				}
 
-				message = receive_queue.erase(message);
-			}
+				return true;
+			});
 
 			// Check for time-out.
 			if (millis() - lastReceivedTime > DCSBIOS_ESP32_WIFI_RECEIVE_TIMEOUT) {
@@ -124,19 +124,17 @@ namespace DcsBios {
 			}
 			
 			// Send enqueued data
-			for (auto message = send_queue.begin(); message != send_queue.end();) {
-				if (message->retries > DCSBIOS_ESP32_WIFI_SEND_RETRIES) {
-					Serial.println("Giving up on message " + String(message->seq));
-					message = send_queue.erase(message);
-				} else if (millis() - message->lastSentTime > DCSBIOS_ESP32_WIFI_SEND_RETRY_DELAY) {
-					client->send(static_cast<Message&>(*message));
-					message->retries++;
-					message->lastSentTime = millis();
-					++message;
-				} else {
-					++message;
+			send_queue.for_each_remove_if([&](Message& message) -> bool {
+				if (message.retries > DCSBIOS_ESP32_WIFI_SEND_RETRIES) {
+					Serial.println("Giving up on message " + String(message.seq) + " after " + String(message.retries) + " retries.");
+					return true; // Remove this message from send_queue
+				} else if (millis() - message.lastSentTime > DCSBIOS_ESP32_WIFI_SEND_RETRY_DELAY) {
+					client->send(message);
+					message.retries++;
+					message.lastSentTime = millis();
 				}
-			}
+				return false; // Do not remove this message from send_queue
+			});
 		}
 	}
 
