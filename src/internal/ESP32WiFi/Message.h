@@ -10,9 +10,12 @@
 
 namespace DcsBios {
     class Message {
+    public:
+        bool force = false;
+
     private:
         SlaveMessage slave_message;
-
+        
         static bool encode_to_string(pb_ostream_t *stream, const pb_field_t *field, void * const *arg) {
             const String *str = reinterpret_cast<const String*>(*arg);
             if (!pb_encode_tag_for_field(stream, field)) {

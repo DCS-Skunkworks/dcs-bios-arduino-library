@@ -16,8 +16,8 @@ namespace DcsBios {
 	public:
 		void begin();
 		void loop();
-		void enqueue(const char* type);
-		void enqueue(const char* type, String data);
+		void enqueue(const char* type, bool force = false);
+		void enqueue(const char* type, String data, bool force = false);
 	private:
 		bool connect_wifi();
 		bool disconnect_wifi();

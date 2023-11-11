@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <AsyncUDP.h>
+#include <WiFi.h>
 
 namespace DcsBios {
     class DcsBiosESP32MulticastClient : public ClientInterface {
@@ -9,7 +10,7 @@ namespace DcsBios {
         AsyncUDP udp;
 
         IPAddress master_ip = IPAddress(0, 0, 0, 0);
-		unsigned int master_port = 0;
+		unsigned int master_port = DCSBIOS_ESP32_WIFI_LOCAL_PORT;
 
         bool listening = false;
         ThreadSafeDeque<Message> &receive_queue;
@@ -19,18 +20,18 @@ namespace DcsBios {
         bool start() {
             if (udp.listenMulticast(DCSBIOS_ESP32_WIFI_MULTICAST_GROUP, DCSBIOS_ESP32_WIFI_LOCAL_PORT)) {
                 Serial.println("Multicast listener started.");
+                master_ip = WiFi.broadcastIP();
                 listening = true;
 
                 udp.onPacket([this](AsyncUDPPacket packet) {
                     Message message = Message(packet);
                     receive_queue.push_back(message);
 
-                    // Set master IP and port if not set
-                    if (master_port == 0) {
+                    // Set master IP if not set
+                    if (master_ip == WiFi.broadcastIP()) {
                         master_ip = packet.remoteIP();
-                        master_port = DCSBIOS_ESP32_WIFI_LOCAL_PORT;
 
-                        Serial.print("Master IP: " + master_ip.toString() + " Port: " + String(master_port));
+                        Serial.println("Master IP: " + master_ip.toString() + " Port: " + String(master_port));
                     }
                 });
 
@@ -44,8 +45,7 @@ namespace DcsBios {
 
         void stop() {
             listening = false;
-            master_ip = IPAddress(0, 0, 0, 0);
-            master_port = 0;
+            master_ip = WiFi.broadcastIP();
         }
 
         void loop() {}
@@ -56,7 +56,7 @@ namespace DcsBios {
         }
 
         bool can_send() {
-            return master_port != 0;
+            return master_ip != WiFi.broadcastIP();
         }
 
         // Service discovery for multicast is not required. Always return true
@@ -64,8 +64,10 @@ namespace DcsBios {
             return true;
         }
 
-        bool send(Message &message) {
-            if (!can_send()) { return false; }
+        bool send(Message &message, bool force = false) {
+            Serial.println("Can send: " + String(can_send()) + " Force: " + String(force) + " Message: " + message.type);
+
+            if (!can_send() && !force ) { return false; }
 
             std::vector<unsigned char> encoded(256);
             message.encodeToVector(encoded);

@@ -17,7 +17,7 @@ namespace DcsBios {
         virtual bool can_send() = 0;
 
         // Send Message
-        virtual bool send(Message &message) = 0;
+        virtual bool send(Message &message, bool force = false) = 0;
     private:
         IPAddress master_ip = IPAddress(0, 0, 0, 0);
 		unsigned int master_port = 0;

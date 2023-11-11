@@ -117,8 +117,8 @@ namespace DcsBios {
 			}
 
 			// Send check-in
-			if (client->can_send() && (millis() - lastKeepAliveTime >= DCSBIOS_ESP32_WIFI_KEEPALIVE_PERIOD)) {
-				enqueue("check-in");
+			if (millis() - lastKeepAliveTime >= DCSBIOS_ESP32_WIFI_KEEPALIVE_PERIOD) {
+				enqueue("check-in", true);
 
 				lastKeepAliveTime = millis();
 			}
@@ -126,7 +126,7 @@ namespace DcsBios {
 			// Send enqueued data
 			send_queue.for_each_remove_if([&](Message& message) -> bool {
 				if (millis() - message.lastSentTime > DCSBIOS_ESP32_WIFI_SEND_RETRY_DELAY) {
-					client->send(message);
+					client->send(message, message.force);
 					message.retries++;
 					message.lastSentTime = millis();
 				}
@@ -142,17 +142,18 @@ namespace DcsBios {
 		}
 	}
 
-	void ESP32WiFiSlave::enqueue(const char* type) {
-		enqueue(type, "");
+	void ESP32WiFiSlave::enqueue(const char* type, bool force) {
+		enqueue(type, "", force);
 	}
 
-	void ESP32WiFiSlave::enqueue(const char* type, String data) {
+	void ESP32WiFiSlave::enqueue(const char* type, String data, bool force) {
 		Message message(type, data, ++last_message_id);
 
+		message.force = force;
 		message.slave_details.id = DCSBIOS_ESP32_WIFI;
+		message.slave_details.mac = WiFi.macAddress();
 
 		if (message.type == "check-in") {
-			message.slave_details.mac = WiFi.macAddress();
 			message.slave_details.rssi = WiFi.RSSI();
 			message.slave_details.loop_duration = lastLoopDuration;
 			message.slave_details.free_heap = ESP.getFreeHeap();
