@@ -1,6 +1,6 @@
 {
   "name": "DCS-BIOS DCSBIOSKit-Fork",
-  "version": "0.3.9",
+  "version": "3.9.0",
   "description": "Connect input and output devices to the DCS: World flight simulator using DCS-BIOS. DCS-BIOS is a piece of software that can extract data from DCS: World and sends them to an Arduino. It also accepts commands over the serial port. This library talks to DCS-BIOS and allows you to connect any component your Arduino can communicate with to your virtual cockpit. This is a fork of the Skunkworks dcs-bios library which additions and modificatíons for DCSBIOSKit hardware.",
   "keywords": ["DCS", "BIOS", "Simulation", "Flight", "Arduino"],
   "homepage": "http://dcsbioskit.com",
