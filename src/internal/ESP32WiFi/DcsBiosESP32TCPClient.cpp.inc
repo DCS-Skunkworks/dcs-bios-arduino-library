@@ -1,4 +1,5 @@
 #ifdef DCSBIOS_ESP32_WIFI
+#ifdef DCSBIOS_ESP32_WIFI_TCP
 
 #include <Arduino.h>
 #include <AsyncTCP.h>
@@ -175,4 +176,5 @@ namespace DcsBios {
     };
 }
 
+#endif
 #endif
