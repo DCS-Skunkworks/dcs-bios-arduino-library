@@ -1,6 +1,11 @@
 #ifdef DCSBIOS_ESP32_WIFI
 
+#ifdef PLATFORMIO
 #include <pb_decode.h>
+#else
+#include "nanopb/pb_decode.h"
+#endif
+
 #include "SlaveMessage.pb.h"
 
 namespace DcsBios {

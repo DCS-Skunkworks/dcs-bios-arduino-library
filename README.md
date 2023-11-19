@@ -23,3 +23,7 @@ This is a community maintained plugin.  Support is best found at the DCS-Flightp
 1. Bump version number in library.properties
 2. Run make_release, providing the same version number when prompted.
 3. Manually make a zip file of the folder created in /Releases, and upload to github.
+
+### Acknowledgements
+This version of dcs-bios-arduino-library uses nanopb licensed under the zlib license.
+For more information, see https://github.com/nanopb/nanopb
