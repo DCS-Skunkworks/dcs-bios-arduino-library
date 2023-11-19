@@ -3,7 +3,6 @@
 #ifdef DCSBIOS_ESP32_WIFI
 
 #include <Arduino.h>
-#include <ArduinoJson.h>
 #include <WiFi.h>
 
 #include "Utils.h"
