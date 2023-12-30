@@ -5,6 +5,10 @@
 	#error "This code is designed to run on ESP32! Please check your build settings."
 #endif
 
+#if !defined(DCSBIOS_ESP32_WIFI_SSID) && !defined(DCSBIOS_ESP32_TCP)
+    #error "Ethernet mode only supports TCP."
+#endif
+
 #ifndef DCSBIOS_ESP32_LOCAL_PORT
 	#define DCSBIOS_ESP32_LOCAL_PORT 7779
 #endif
