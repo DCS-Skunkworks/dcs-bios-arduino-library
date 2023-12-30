@@ -1,11 +1,11 @@
 #include "Utils.h"
 
 namespace DcsBios {
-	#ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
+	#ifdef DCSBIOS_ESP32_NEOPIXEL
 	void beginNeopixel() {
-		neopixel = Adafruit_NeoPixel(1, DCSBIOS_ESP32_WIFI_NEOPIXEL, NEO_GRB + NEO_KHZ800);
+		neopixel = Adafruit_NeoPixel(1, DCSBIOS_ESP32_NEOPIXEL, NEO_GRB + NEO_KHZ800);
 		neopixel.begin();
-		neopixel.setBrightness(DCSBIOS_ESP32_WIFI_NEOPIXEL_BRIGHTNESS);
+		neopixel.setBrightness(DCSBIOS_ESP32_NEOPIXEL_BRIGHTNESS);
 	}
 
 	void setNeopixel(WiFiStatus state) {

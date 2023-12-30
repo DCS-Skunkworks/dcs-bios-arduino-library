@@ -4,13 +4,8 @@
 #include <vector>
 #include <Arduino.h>
 #include <AsyncUDP.h>
-#ifdef PLATFORMIO
 #include <pb_encode.h>
 #include <pb_decode.h>
-#else
-#include "nanopb/pb_encode.h"
-#include "nanopb/pb_decode.h"
-#endif
 #include "SlaveMessage.pb.h"
 
 namespace DcsBios {

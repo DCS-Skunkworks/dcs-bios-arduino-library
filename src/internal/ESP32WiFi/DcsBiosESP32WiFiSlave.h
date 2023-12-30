@@ -1,6 +1,6 @@
-#ifndef _DCSBIOS_ESP32_WIFI_H_
-#define _DCSBIOS_ESP32_WIFI_H_
-#ifdef DCSBIOS_ESP32_WIFI
+#ifndef _DCSBIOS_ESP32_H_
+#define _DCSBIOS_ESP32_H_
+#ifdef DCSBIOS_ESP32_ID
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -34,7 +34,7 @@ namespace DcsBios {
 		ThreadSafeDeque<Message> send_queue;
 
 		// Performance Instrumentation
-		#ifdef DCSBIOS_ESP32_WIFI_INSTRUMENTATION
+		#ifdef DCSBIOS_ESP32_INSTRUMENTATION
 		unsigned long lastLoopTime = 0;
 		unsigned long lastLoopDuration = 0;
 		#endif
@@ -44,4 +44,4 @@ namespace DcsBios {
 }
 
 #endif // DCSBIOS_ESP32_WIFI
-#endif // _DCSBIOS_ESP32_WIFI_H_
+#endif // _DCSBIOS_ESP32_H_

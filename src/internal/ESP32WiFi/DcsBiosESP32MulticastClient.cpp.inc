@@ -1,4 +1,4 @@
-#ifdef DCSBIOS_ESP32_WIFI
+#ifdef DCSBIOS_ESP32_ID
 
 #include <Arduino.h>
 #include <AsyncUDP.h>
@@ -10,7 +10,7 @@ namespace DcsBios {
         AsyncUDP udp;
 
         IPAddress master_ip = IPAddress(0, 0, 0, 0);
-		unsigned int master_port = DCSBIOS_ESP32_WIFI_LOCAL_PORT;
+		unsigned int master_port = DCSBIOS_ESP32_LOCAL_PORT;
 
         bool listening = false;
         ThreadSafeDeque<Message> &receive_queue;
@@ -18,7 +18,7 @@ namespace DcsBios {
         DcsBiosESP32MulticastClient(ThreadSafeDeque<Message> &receive_queue) : receive_queue(receive_queue) {}
 
         bool start() {
-            if (udp.listenMulticast(DCSBIOS_ESP32_WIFI_MULTICAST_GROUP, DCSBIOS_ESP32_WIFI_LOCAL_PORT)) {
+            if (udp.listenMulticast(DCSBIOS_ESP32_MULTICAST_GROUP, DCSBIOS_ESP32_LOCAL_PORT)) {
                 Serial.println("Multicast listener started.");
                 master_ip = WiFi.broadcastIP();
                 listening = true;

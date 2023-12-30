@@ -1,4 +1,4 @@
-#ifdef DCSBIOS_ESP32_WIFI
+#ifdef DCSBIOS_ESP32_ID
 
 #include <Arduino.h>
 #include <AsyncTCP.h>
@@ -134,9 +134,9 @@ namespace DcsBios {
         }
 
         bool discover() {
-            #ifdef DCSBIOS_ESP32_WIFI_MASTER_IP
-            master_ip = DCSBIOS_ESP32_WIFI_MASTER_IP;
-            master_port = DCSBIOS_ESP32_WIFI_MASTER_PORT;
+            #ifdef DCSBIOS_ESP32_MASTER_IP
+            master_ip = DCSBIOS_ESP32_MASTER_IP;
+            master_port = DCSBIOS_ESP32_MASTER_PORT;
 
             return true;
             #endif

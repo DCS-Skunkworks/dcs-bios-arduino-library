@@ -48,7 +48,7 @@ do not come with their own build system, we are just putting everything into the
 	#include "internal/DcsBiosNgRS485Slave.h"
 	#include "internal/DcsBiosNgRS485Slave.cpp.inc"
 #endif
-#ifdef DCSBIOS_ESP32_WIFI
+#ifdef DCSBIOS_ESP32_ID
 	#include "internal/ESP32WiFi/Utils.h"
 	#include "internal/ESP32WiFi/Defines.h"
 	#include "internal/ESP32WiFi/Message.h"

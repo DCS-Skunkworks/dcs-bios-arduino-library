@@ -6,9 +6,9 @@
 #include <mutex>
 #include <functional>
 
-#ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
-#ifndef DCSBIOS_ESP32_WIFI_NEOPIXEL_BRIGHTNESS
-#define DCSBIOS_ESP32_WIFI_NEOPIXEL_BRIGHTNESS 128
+#ifdef DCSBIOS_ESP32_NEOPIXEL
+#ifndef DCSBIOS_ESP32_NEOPIXEL_BRIGHTNESS
+#define DCSBIOS_ESP32_NEOPIXEL_BRIGHTNESS 128
 #endif
 
 #include <Adafruit_NeoPixel.h>
@@ -23,7 +23,7 @@ namespace DcsBios {
         RECEIVED
     };
     
-    #ifdef DCSBIOS_ESP32_WIFI_NEOPIXEL
+    #ifdef DCSBIOS_ESP32_NEOPIXEL
     Adafruit_NeoPixel neopixel;
 
     void beginNeopixel();

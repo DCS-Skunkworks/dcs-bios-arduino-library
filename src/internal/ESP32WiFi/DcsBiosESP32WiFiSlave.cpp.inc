@@ -1,12 +1,7 @@
-#ifdef DCSBIOS_ESP32_WIFI
+#ifdef DCSBIOS_ESP32_ID
 
-#ifdef PLATFORMIO
 #include <pb_decode.h>
-#else
-#include "nanopb/pb_decode.h"
-#endif
-
-#include <Ethernet.h>
+#include <Ethernet_Generic.h> // khoih-prog/Ethernet_Generic@^2.8.1
 #include "SlaveMessage.pb.h"
 
 namespace DcsBios {
@@ -62,7 +57,7 @@ namespace DcsBios {
 			Serial.println("Connecting to WiFi...");
 			
 			// Check association timeout, sometimes restarting the ESP32 is faster than waiting.
-			if (millis() - start_time > DCSBIOS_ESP32_WIFI_ASSOCIATION_TIMEOUT) {
+			if (millis() - start_time > DCSBIOS_ESP32_ASSOCIATION_TIMEOUT) {
 				Serial.println("WiFi association timed out.");
 
 				return false;
@@ -85,19 +80,19 @@ namespace DcsBios {
 	}
 
 	void ESP32WiFiSlave::set_client() {
-		#ifdef DCSBIOS_ESP32_WIFI_MULTICAST
+		#ifdef DCSBIOS_ESP32_MULTICAST
 		client = new DcsBiosESP32MulticastClient(receive_queue);
-		#elif defined(DCSBIOS_ESP32_WIFI_TCP)
+		#elif defined(DCSBIOS_ESP32_TCP)
 		client = new DcsBiosESP32TCPClient(receive_queue);
-		#elif defined(DCSBIOS_ESP32_WIFI_UDP)
+		#elif defined(DCSBIOS_ESP32_UDP)
 		client = new DcsBiosESP32UnicastClient(receive_queue);
 		#else
-		#error "Communication protocol not selected. Please #define either DCSBIOS_ESP32_WIFI_MULTICAST, DCSBIOS_ESP32_WIFI_UDP or DCSBIOS_ESP32_WIFI_TCP."
+		#error "Communication protocol not selected. Please #define either DCSBIOS_ESP32_MULTICAST, DCSBIOS_ESP32_UDP or DCSBIOS_ESP32_TCP."
 		#endif
 	}
 
 	void ESP32WiFiSlave::loop() {
-		#ifdef DCSBIOS_ESP32_WIFI_INSTRUMENTATION
+		#ifdef DCSBIOS_ESP32_INSTRUMENTATION
 		lastLoopDuration = micros() - lastLoopTime;
 		lastLoopTime = micros();
 		#endif
@@ -132,13 +127,13 @@ namespace DcsBios {
 				} else if (message.type == "ack") { // Nexus has acknowledged a message, remove it from the send_queue.
 					Serial.println("Received ack for " + String(message.seq));
 					send_queue.for_each_remove_if([&](Message& queued_packet) -> bool {
-						if (message.slave_details.id == DCSBIOS_ESP32_WIFI && queued_packet.seq == message.seq) {
+						if (message.slave_details.id == DCSBIOS_ESP32_ID && queued_packet.seq == message.seq) {
 							return true; // Remove this packet from send_queue
 						}
 						return false; // Do not remove this packet from send_queue
 					});
 
-				} else if ((message.type == "restart" && message.slave_details.id == DCSBIOS_ESP32_WIFI) || message.type == "restart-all") { // Restart command.
+				} else if ((message.type == "restart" && message.slave_details.id == DCSBIOS_ESP32_ID) || message.type == "restart-all") { // Restart command.
 					Serial.println("Restarting on Nexus request.");
 					ESP.restart();
 				}
@@ -147,14 +142,14 @@ namespace DcsBios {
 			});
 
 			// Check for time-out.
-			if (millis() - lastReceivedTime > DCSBIOS_ESP32_WIFI_RECEIVE_TIMEOUT) {
+			if (millis() - lastReceivedTime > DCSBIOS_ESP32_RECEIVE_TIMEOUT) {
 				client->stop();
 				setNeopixel(ASSOCIATED);
 				Serial.println("Connection timed out, restarting.");
 			}
 
 			// Send check-in
-			if (millis() - lastKeepAliveTime >= DCSBIOS_ESP32_WIFI_KEEPALIVE_PERIOD) {
+			if (millis() - lastKeepAliveTime >= DCSBIOS_ESP32_KEEPALIVE_PERIOD) {
 				enqueue("check-in", true);
 
 				lastKeepAliveTime = millis();
@@ -162,13 +157,13 @@ namespace DcsBios {
 			
 			// Send enqueued data
 			send_queue.for_each_remove_if([&](Message& message) -> bool {
-				if (millis() - message.lastSentTime > DCSBIOS_ESP32_WIFI_SEND_RETRY_DELAY) {
+				if (millis() - message.lastSentTime > DCSBIOS_ESP32_SEND_RETRY_DELAY) {
 					client->send(message, message.force);
 					message.retries++;
 					message.lastSentTime = millis();
 				}
 
-				if (message.retries >= DCSBIOS_ESP32_WIFI_SEND_RETRIES) {
+				if (message.retries >= DCSBIOS_ESP32_SEND_RETRIES) {
 					// Serial.println("Reached maximum retries for " + String(message.seq) + " after " + String(message.retries) + " retries.");
 					
 					return true; // Remove this message from send_queue
@@ -187,7 +182,7 @@ namespace DcsBios {
 		Message message(type, data, ++last_message_id);
 
 		message.force = force;
-		message.slave_details.id = DCSBIOS_ESP32_WIFI;
+		message.slave_details.id = DCSBIOS_ESP32_ID;
 		message.slave_details.mac = WiFi.macAddress();
 
 		if (message.type == "check-in") {
@@ -196,7 +191,7 @@ namespace DcsBios {
 			message.slave_details.free_heap = ESP.getFreeHeap();
 			message.slave_details.cpu_freq = ESP.getCpuFreqMHz();
 			message.slave_details.flash_size = ESP.getFlashChipSize();
-			message.retries = DCSBIOS_ESP32_WIFI_SEND_RETRIES; // Check-in messages are not important, so we set retries to the maximum to prevent them from being retried.
+			message.retries = DCSBIOS_ESP32_SEND_RETRIES; // Check-in messages are not important, so we set retries to the maximum to prevent them from being retried.
 		}
 
 		send_queue.push_back(message);
