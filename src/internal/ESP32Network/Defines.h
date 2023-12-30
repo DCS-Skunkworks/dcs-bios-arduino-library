@@ -5,14 +5,6 @@
 	#error "This code is designed to run on ESP32! Please check your build settings."
 #endif
 
-#ifndef DCSBIOS_ESP32_WIFI_SSID
-	#error "DCSBIOS_ESP32_WIFI_SSID is not defined."
-#endif
-
-#ifndef DCSBIOS_ESP32_WIFI_PASSWORD
-	#error "DCSBIOS_ESP32_WIFI_PASSWORD is not defined."
-#endif
-
 #ifndef DCSBIOS_ESP32_LOCAL_PORT
 	#define DCSBIOS_ESP32_LOCAL_PORT 7779
 #endif

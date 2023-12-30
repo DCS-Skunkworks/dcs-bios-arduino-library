@@ -5,13 +5,13 @@
 #include "SlaveMessage.pb.h"
 
 namespace DcsBios {
-	void ESP32WiFiSlave::begin() {
+	void ESP32NetworkedSlave::begin() {
 		beginNeopixel();
 		Serial.begin(115200);
 		setNeopixel(OFFLINE);
 		
 		// Connect to WiFi
-		if (!connect_wifi()) {
+		if (!connect_phy()) {
 			Serial.println("Restarting.");
 			ESP.restart();
 		}
@@ -20,7 +20,7 @@ namespace DcsBios {
 		set_client();
 	}
 
-	bool ESP32WiFiSlave::connect_wifi() {
+	bool ESP32NetworkedSlave::connect_phy() {
 		Ethernet.init(SS);
 
 		Serial.println("Initialize Ethernet with DHCP:");
@@ -73,13 +73,13 @@ namespace DcsBios {
 		*/
 	}
 
-	bool ESP32WiFiSlave::disconnect_wifi() {
+	bool ESP32NetworkedSlave::disconnect_phy() {
 		setNeopixel(OFFLINE);
 
 		return WiFi.disconnect(true, true);
 	}
 
-	void ESP32WiFiSlave::set_client() {
+	void ESP32NetworkedSlave::set_client() {
 		#ifdef DCSBIOS_ESP32_MULTICAST
 		client = new DcsBiosESP32MulticastClient(receive_queue);
 		#elif defined(DCSBIOS_ESP32_TCP)
@@ -91,7 +91,7 @@ namespace DcsBios {
 		#endif
 	}
 
-	void ESP32WiFiSlave::loop() {
+	void ESP32NetworkedSlave::loop() {
 		#ifdef DCSBIOS_ESP32_INSTRUMENTATION
 		lastLoopDuration = micros() - lastLoopTime;
 		lastLoopTime = micros();
@@ -174,11 +174,11 @@ namespace DcsBios {
 		}
 	}
 
-	void ESP32WiFiSlave::enqueue(const char* type, bool force) {
+	void ESP32NetworkedSlave::enqueue(const char* type, bool force) {
 		enqueue(type, "", force);
 	}
 
-	void ESP32WiFiSlave::enqueue(const char* type, String data, bool force) {
+	void ESP32NetworkedSlave::enqueue(const char* type, String data, bool force) {
 		Message message(type, data, ++last_message_id);
 
 		message.force = force;

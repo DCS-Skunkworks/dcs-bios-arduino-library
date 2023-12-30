@@ -11,15 +11,15 @@
 namespace DcsBios {
 	ProtocolParser parser;
 
-	class ESP32WiFiSlave {
+	class ESP32NetworkedSlave {
 	public:
 		void begin();
 		void loop();
 		void enqueue(const char* type, bool force = false);
 		void enqueue(const char* type, String data, bool force = false);
 	private:
-		bool connect_wifi();
-		bool disconnect_wifi();
+		bool connect_phy();
+		bool disconnect_phy();
 		void set_client();
 
 		// Swappable client depending on communication protocol
@@ -40,7 +40,7 @@ namespace DcsBios {
 		#endif
 	};
 
-	ESP32WiFiSlave wifiSlave;
+	ESP32NetworkedSlave wifiSlave;
 }
 
 #endif // DCSBIOS_ESP32_WIFI
