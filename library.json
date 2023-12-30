@@ -30,6 +30,8 @@
     "adafruit/Adafruit NeoPixel": "^1.11.0",
     "madhephaestus/ESP32Servo": "^1.1.0",
     "nanopb/Nanopb": "^0.4.7",
-    "esphome/AsyncTCP-esphome": "^2.0.1"
+    "esphome/AsyncTCP-esphome": "^2.0.1",
+    "khoih-prog/Ethernet_Generic": "^2.8.1",
+    "jandrassy/EthernetENC": "^2.0.4"
   }
 }

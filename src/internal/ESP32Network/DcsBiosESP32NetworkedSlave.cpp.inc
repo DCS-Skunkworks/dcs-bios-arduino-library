@@ -4,7 +4,12 @@
 #include "SlaveMessage.pb.h"
 
 #ifndef DCSBIOS_ESP32_WIFI_SSID
-#include <Ethernet_Generic.h> // khoih-prog/Ethernet_Generic@^2.8.1
+#ifdef DCSBIOS_ESP32_WIZNET
+	#include <Ethernet_Generic.h> // khoih-prog/Ethernet_Generic@^2.8.1
+#endif
+#ifdef DCSBIOS_ESP32_ENC28J60
+	#include <Ethernet.h> // jandrassy/EthernetENC@^2.0.4
+#endif
 #endif
 
 namespace DcsBios {
@@ -132,7 +137,7 @@ namespace DcsBios {
 	}
 
 	bool ESP32NetworkedSlave::disconnect_ethernet() {
-		#ifndef DCSBIOS_ESP32_WIFI_SSID
+		#ifdef DCSBIOS_ESP32_WIZNET
 		Ethernet.softreset();
 		delay(100);
 		Ethernet.hardreset();
