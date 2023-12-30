@@ -1,8 +1,11 @@
 #ifdef DCSBIOS_ESP32_ID
 
 #include <pb_decode.h>
-#include <Ethernet_Generic.h> // khoih-prog/Ethernet_Generic@^2.8.1
 #include "SlaveMessage.pb.h"
+
+#ifndef DCSBIOS_ESP32_WIFI_SSID
+#include <Ethernet_Generic.h> // khoih-prog/Ethernet_Generic@^2.8.1
+#endif
 
 namespace DcsBios {
 	void ESP32NetworkedSlave::begin() {
@@ -21,11 +24,48 @@ namespace DcsBios {
 	}
 
 	bool ESP32NetworkedSlave::connect_phy() {
-		Ethernet.init(SS);
+		#ifdef DCSBIOS_ESP32_WIFI_SSID
+			return connect_wifi();
+		#else
+			return connect_ethernet();
+		#endif
+	}
+
+	bool ESP32NetworkedSlave::connect_wifi() {
+		#if defined(DCSBIOS_ESP32_WIFI_SSID) && defined(DCSBIOS_ESP32_WIFI_SSID)
+		WiFi.begin(DCSBIOS_ESP32_WIFI_SSID, DCSBIOS_ESP32_WIFI_PASSWORD);
+		#endif
+
+		unsigned long start_time = millis();
+		
+		while (WiFi.status() != WL_CONNECTED) {
+			Serial.println("Connecting to WiFi...");
+			
+			// Check association timeout, sometimes restarting the ESP32 is faster than waiting.
+			if (millis() - start_time > DCSBIOS_ESP32_ASSOCIATION_TIMEOUT) {
+				Serial.println("WiFi association timed out.");
+
+				return false;
+			}
+
+			delay(500);
+		}
+
+		setNeopixel(ASSOCIATED);
+		Serial.println("Connected to " + WiFi.SSID() + " with IP " + WiFi.localIP().toString());
+
+		return true;
+	}
+
+	bool ESP32NetworkedSlave::connect_ethernet() {
+		#ifndef DCSBIOS_ESP32_WIFI_SSID
+		Ethernet.init(DCSBIOS_ESP32_ETHERNET_CS);
 
 		Serial.println("Initialize Ethernet with DHCP:");
-		byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
-
+		
+		uint8_t mac[6];
+    	generateMACAddress(DCSBIOS_ESP32_ID, mac); // Generate a stable MAC address based on the device ID.
+		
 		if (Ethernet.begin(mac) == 0) {
 			Serial.println("Failed to configure Ethernet using DHCP");
 			// Check for Ethernet hardware present
@@ -47,36 +87,58 @@ namespace DcsBios {
 		// give the Ethernet shield a second to initialize:
 		delay(1000);
 
+		#endif
+
 		return true;
+	}
 
-		/*WiFi.begin(DCSBIOS_ESP32_WIFI_SSID, DCSBIOS_ESP32_WIFI_PASSWORD);
-
-		unsigned long start_time = millis();
-		
-		while (WiFi.status() != WL_CONNECTED) {
-			Serial.println("Connecting to WiFi...");
-			
-			// Check association timeout, sometimes restarting the ESP32 is faster than waiting.
-			if (millis() - start_time > DCSBIOS_ESP32_ASSOCIATION_TIMEOUT) {
-				Serial.println("WiFi association timed out.");
-
-				return false;
-			}
-
-			delay(500);
+	void ESP32NetworkedSlave::generateMACAddress(const std::string& identifier, uint8_t mac[6]) {
+		// Simple hash: XOR and rotate
+		uint32_t hash = 0;
+		for (char c : identifier) {
+			hash = (hash << 1) | (hash >> (31)); // Rotate left
+			hash ^= c; // XOR with the character
 		}
 
-		setNeopixel(ASSOCIATED);
-		Serial.println("Connected to " + WiFi.SSID() + " with IP " + WiFi.localIP().toString());
+		// Use parts of the hash to fill in the MAC address
+		mac[0] = 0x02; // Locally administered and unicast
+		mac[1] = (hash >> 24) & 0xFF;
+		mac[2] = (hash >> 16) & 0xFF;
+		mac[3] = (hash >> 8) & 0xFF;
+		mac[4] = hash & 0xFF;
+		mac[5] = (hash >> 4) & 0xFF;
 
-		return true;
-		*/
+		Serial.print("Generated MAC address: ");
+		for (int i = 0; i < 6; ++i) {
+			if(mac[i] < 16) Serial.print("0");
+			Serial.print(mac[i], HEX);
+			if (i < 5) Serial.print(":");
+		}
+		Serial.println();
 	}
 
 	bool ESP32NetworkedSlave::disconnect_phy() {
 		setNeopixel(OFFLINE);
 
+		#ifdef DCSBIOS_ESP32_WIFI_SSID
+			return disconnect_wifi();
+		#else
+			return disconnect_ethernet();
+		#endif
+	}
+
+	bool ESP32NetworkedSlave::disconnect_wifi() {
 		return WiFi.disconnect(true, true);
+	}
+
+	bool ESP32NetworkedSlave::disconnect_ethernet() {
+		#ifndef DCSBIOS_ESP32_WIFI_SSID
+		Ethernet.softreset();
+		delay(100);
+		Ethernet.hardreset();
+		#endif
+
+		return true;
 	}
 
 	void ESP32NetworkedSlave::set_client() {

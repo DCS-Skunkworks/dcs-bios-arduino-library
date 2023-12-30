@@ -1,12 +1,22 @@
 #ifndef _DCSBIOS_ESP32_DEFINES_H_
 #define _DCSBIOS_ESP32_DEFINES_H_
 
+#include <SPI.h>
+
 #ifndef ARDUINO_ARCH_ESP32
 	#error "This code is designed to run on ESP32! Please check your build settings."
 #endif
 
 #if !defined(DCSBIOS_ESP32_WIFI_SSID) && !defined(DCSBIOS_ESP32_TCP)
     #error "Ethernet mode only supports TCP."
+#endif
+
+#if !defined(DCSBIOS_ESP32_WIFI_SSID) && !defined(DCSBIOS_ESP32_MASTER_IP)
+    #error "Ethernet mode does not support mDNS and requires DCSBIOS_ESP32_MASTER_IP and DCSBIOS_ESP32_MASTER_PORT."
+#endif
+
+#ifndef DCSBIOS_ESP32_ETHERNET_CS
+	#define DCSBIOS_ESP32_ETHERNET_CS SS
 #endif
 
 #ifndef DCSBIOS_ESP32_LOCAL_PORT

@@ -19,7 +19,14 @@ namespace DcsBios {
 		void enqueue(const char* type, String data, bool force = false);
 	private:
 		bool connect_phy();
+		bool connect_wifi();
+		bool connect_ethernet();
+		void generateMACAddress(const std::string& identifier, uint8_t mac[6]);
+
 		bool disconnect_phy();
+		bool disconnect_wifi();
+		bool disconnect_ethernet();
+
 		void set_client();
 
 		// Swappable client depending on communication protocol
