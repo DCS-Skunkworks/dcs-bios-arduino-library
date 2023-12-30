@@ -15,6 +15,10 @@
     #error "Ethernet mode does not support mDNS and requires DCSBIOS_ESP32_MASTER_IP and DCSBIOS_ESP32_MASTER_PORT."
 #endif
 
+#if defined(DCSBIOS_ESP32_ENC28J60) && defined(DCSBIOS_ESP32_WIZNET)
+	#error "You must select either DCSBIOS_ESP32_WIZNET or DCSBIOS_ESP32_ENC28J60."
+#endif
+
 #ifndef DCSBIOS_ESP32_ETHERNET_CS
 	#define DCSBIOS_ESP32_ETHERNET_CS SS
 #endif
