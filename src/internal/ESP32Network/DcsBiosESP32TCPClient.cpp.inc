@@ -3,12 +3,19 @@
 #include <Arduino.h>
 #include <AsyncTCP.h>
 #include <ESPmDNS.h>
-#include <EthernetClient.h>
+
+#ifndef DCSBIOS_ESP32_WIFI_SSID
+    #include <EthernetClient.h>
+#endif
 
 namespace DcsBios {
     class DcsBiosESP32TCPClient : public ClientInterface {
     private:
-        EthernetClient tcpClient;
+        #ifdef DCSBIOS_ESP32_WIFI_SSID
+            AsyncClient tcpClient;
+        #else
+            EthernetClient tcpClient;
+        #endif
 
         IPAddress master_ip;
         uint16_t master_port;
@@ -27,7 +34,11 @@ namespace DcsBios {
 
         size_t bytesToIgnore = 0;
         
+        #ifdef DCSBIOS_ESP32_WIFI_SSID
+        void onClientData(void* arg, AsyncClient* client, void* data, size_t len) {
+        #else
         void onClientData(void* data, size_t len) {
+        #endif
             const size_t MAX_MESSAGE_SIZE = 1024;
 
             // Discard data for oversized messages
@@ -93,8 +104,26 @@ namespace DcsBios {
         bool start() {
             Serial.println("Starting TCP client.");
 
+            // Using native AsyncTCP
+            #ifdef DCSBIOS_ESP32_WIFI_SSID
+                tcpClient.onData([](void* arg, AsyncClient* client, void* data, size_t len) {
+                    ((DcsBiosESP32TCPClient*)arg)->onClientData(arg, client, data, len);
+                }, this);
+
+                tcpClient.onConnect([](void* arg, AsyncClient* client) {
+                    Serial.println("TCP client connected.");
+                }, this);
+
+                tcpClient.onError([](void* arg, AsyncClient* client, int error) {
+                    Serial.print("TCP client error: ");
+                    Serial.println(error);
+                }, this);
+            #endif
+
             if (tcpClient.connect(master_ip, master_port)) {
-                Serial.println("TCP client connected.");
+                #ifndef DCSBIOS_ESP32_WIFI_SSID
+                    Serial.println("TCP client connected.");
+                #endif
 
                 return true;
             } else {
@@ -113,16 +142,18 @@ namespace DcsBios {
         }
 
         void loop() {
-            if (connected()) {
-                int len = tcpClient.available();
-                
-                if (len > 0) {
-                    byte data[len];
-                    tcpClient.read(data, len);
+            #ifndef DCSBIOS_ESP32_WIFI_SSID
+                if (connected()) {
+                    int len = tcpClient.available();
+                    
+                    if (len > 0) {
+                        byte data[len];
+                        tcpClient.read(data, len);
 
-                    onClientData(data, len);
+                        onClientData(data, len);
+                    }
                 }
-            }
+            #endif
         }
 
         bool connected() {
@@ -134,14 +165,17 @@ namespace DcsBios {
         }
 
         bool discover() {
+            // Many Ethernet libraries don't support mDNS. If DCSBIOS_ESP32_MASTER_IP is defined, ignore discovery.
             #ifdef DCSBIOS_ESP32_MASTER_IP
-            master_ip = DCSBIOS_ESP32_MASTER_IP;
-            master_port = DCSBIOS_ESP32_MASTER_PORT;
+                master_ip = DCSBIOS_ESP32_MASTER_IP;
+                master_port = DCSBIOS_ESP32_MASTER_PORT;
 
-            return true;
+                Serial.println("Using static master address: " + String(DCSBIOS_ESP32_MASTER_IP) + ":" + String(DCSBIOS_ESP32_MASTER_PORT));
+
+                return true;
             #endif
             
-            /*const long timeout = 3000;
+            const long timeout = 3000;
             const long retryDelay = 500;
             long startTime = millis();
 
@@ -171,7 +205,7 @@ namespace DcsBios {
 
             MDNS.end();
 
-            return false;*/
+            return false;
         }
 
         bool send(Message &message, bool force = false) {
