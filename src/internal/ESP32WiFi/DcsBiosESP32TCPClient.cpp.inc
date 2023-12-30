@@ -1,14 +1,14 @@
 #ifdef DCSBIOS_ESP32_WIFI
-#ifdef DCSBIOS_ESP32_WIFI_TCP
 
 #include <Arduino.h>
 #include <AsyncTCP.h>
 #include <ESPmDNS.h>
+#include <EthernetClient.h>
 
 namespace DcsBios {
     class DcsBiosESP32TCPClient : public ClientInterface {
     private:
-        AsyncClient tcpClient;
+        EthernetClient tcpClient;
 
         IPAddress master_ip;
         uint16_t master_port;
@@ -27,7 +27,7 @@ namespace DcsBios {
 
         size_t bytesToIgnore = 0;
         
-        void onClientData(void* arg, AsyncClient* client, void* data, size_t len) {
+        void onClientData(void* data, size_t len) {
             const size_t MAX_MESSAGE_SIZE = 1024;
 
             // Discard data for oversized messages
@@ -93,23 +93,14 @@ namespace DcsBios {
         bool start() {
             Serial.println("Starting TCP client.");
 
-            tcpClient.onData([](void* arg, AsyncClient* client, void* data, size_t len) {
-                ((DcsBiosESP32TCPClient*)arg)->onClientData(arg, client, data, len);
-            }, this);
-
-            tcpClient.onConnect([](void* arg, AsyncClient* client) {
-                Serial.println("TCP client connected.");
-            }, this);
-
-            tcpClient.onError([](void* arg, AsyncClient* client, int error) {
-                Serial.print("TCP client error: ");
-                Serial.println(error);
-            }, this);
-
             if (tcpClient.connect(master_ip, master_port)) {
-                Serial.println("TCP client started.");
+                Serial.println("TCP client connected.");
 
                 return true;
+            } else {
+                Serial.println("TCP client failed connect.");
+
+                return false;
             }
 
             Serial.println("TCP client failed to start.");
@@ -118,10 +109,21 @@ namespace DcsBios {
         }
 
         void stop() {
-            tcpClient.close();
+            tcpClient.stop();
         }
 
-        void loop() {}
+        void loop() {
+            if (connected()) {
+                int len = tcpClient.available();
+                
+                if (len > 0) {
+                    byte data[len];
+                    tcpClient.read(data, len);
+
+                    onClientData(data, len);
+                }
+            }
+        }
 
         bool connected() {
             return tcpClient.connected();
@@ -132,7 +134,14 @@ namespace DcsBios {
         }
 
         bool discover() {
-            const long timeout = 3000;
+            #ifdef DCSBIOS_ESP32_WIFI_MASTER_IP
+            master_ip = DCSBIOS_ESP32_WIFI_MASTER_IP;
+            master_port = DCSBIOS_ESP32_WIFI_MASTER_PORT;
+
+            return true;
+            #endif
+            
+            /*const long timeout = 3000;
             const long retryDelay = 500;
             long startTime = millis();
 
@@ -162,7 +171,7 @@ namespace DcsBios {
 
             MDNS.end();
 
-            return false;
+            return false;*/
         }
 
         bool send(Message &message, bool force = false) {
@@ -176,5 +185,4 @@ namespace DcsBios {
     };
 }
 
-#endif
 #endif

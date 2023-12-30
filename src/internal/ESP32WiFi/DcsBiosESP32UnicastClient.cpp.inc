@@ -52,6 +52,13 @@ namespace DcsBios {
         }
 
         bool discover() {
+            #ifdef DCSBIOS_ESP32_WIFI_MASTER_IP
+            master_ip = DCSBIOS_ESP32_WIFI_MASTER_IP;
+            master_port = DCSBIOS_ESP32_WIFI_MASTER_PORT;
+
+            return true;
+            #endif
+
             int n = MDNS.queryService("_dcs-bios", "_udp");
 
             // TODO: Give up after x tries and restart
@@ -65,7 +72,11 @@ namespace DcsBios {
             return false;
         }
 
-        bool send(Message &message) {
+        bool can_send() {
+            return connected();
+        }
+
+        bool send(Message &message, bool force = false) {
             if (master_port == 0) return false;
 
             std::vector<unsigned char> encoded;

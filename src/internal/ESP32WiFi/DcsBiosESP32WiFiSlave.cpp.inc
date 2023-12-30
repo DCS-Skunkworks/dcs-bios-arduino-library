@@ -6,6 +6,7 @@
 #include "nanopb/pb_decode.h"
 #endif
 
+#include <Ethernet.h>
 #include "SlaveMessage.pb.h"
 
 namespace DcsBios {
@@ -25,7 +26,35 @@ namespace DcsBios {
 	}
 
 	bool ESP32WiFiSlave::connect_wifi() {
-		WiFi.begin(DCSBIOS_ESP32_WIFI_SSID, DCSBIOS_ESP32_WIFI_PASSWORD);
+		Ethernet.init(SS);
+
+		Serial.println("Initialize Ethernet with DHCP:");
+		byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+
+		if (Ethernet.begin(mac) == 0) {
+			Serial.println("Failed to configure Ethernet using DHCP");
+			// Check for Ethernet hardware present
+			if (Ethernet.hardwareStatus() == EthernetNoHardware) {
+				Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
+				while (true) {
+					delay(1); // do nothing, no point running without Ethernet hardware
+				}
+			}
+			if (Ethernet.linkStatus() == LinkOFF) {
+				Serial.println("Ethernet cable is not connected.");
+			}
+
+			return false;
+		} else {
+			Serial.print("  DHCP assigned IP ");
+			Serial.println(Ethernet.localIP());
+		}
+		// give the Ethernet shield a second to initialize:
+		delay(1000);
+
+		return true;
+
+		/*WiFi.begin(DCSBIOS_ESP32_WIFI_SSID, DCSBIOS_ESP32_WIFI_PASSWORD);
 
 		unsigned long start_time = millis();
 		
@@ -46,6 +75,7 @@ namespace DcsBios {
 		Serial.println("Connected to " + WiFi.SSID() + " with IP " + WiFi.localIP().toString());
 
 		return true;
+		*/
 	}
 
 	bool ESP32WiFiSlave::disconnect_wifi() {
@@ -71,6 +101,8 @@ namespace DcsBios {
 		lastLoopDuration = micros() - lastLoopTime;
 		lastLoopTime = micros();
 		#endif
+
+		client->loop();
 
 		if (!client->connected()) { // If not connected, ask the client to discover the Nexus.
 			if (client->discover()) {
