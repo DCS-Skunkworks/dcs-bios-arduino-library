@@ -241,5 +241,9 @@ namespace DcsBios {
 		PollingInput::pollInputs();
 		ExportStreamListener::loopAll();
 	}
+
+	void resetAllStates() {
+		PollingInput::resetAllStates();
+	}
 }
 #endif
