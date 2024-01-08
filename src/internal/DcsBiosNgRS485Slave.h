@@ -7,6 +7,10 @@
 
 #ifdef DCSBIOS_FOR_STM32
 #include <libmaple/usart.h>
+#elif defined(DCSBIOS_FOR_ESP32)
+#include <HardwareSerial.h>
+#include <esp32-hal-uart.h>
+#include <driver/uart.h>
 #endif
 
 namespace DcsBios {
@@ -47,6 +51,9 @@ namespace DcsBios {
 		volatile uint32_t *usart_brr;
 		
 		volatile uint32_t *txen_port;
+#elif defined(DCSBIOS_FOR_ESP32)
+		int uart_nr;
+		bool udre = false;
 #else
 		volatile uint8_t *udr;
 		volatile uint8_t *ucsra;
@@ -117,6 +124,17 @@ namespace DcsBios {
 		inline void clear_udrie() { *usart_cr1 &= ~(1<<USART_CR1_TXEIE_BIT); udrie_set = false; }
 		RS485Slave(usart_dev *usart, uint32_t txen_pin);
 		void UsartIRQ();
+#elif defined(DCSBIOS_FOR_ESP32)
+		inline void set_txen() { /* Automagically managed by ESP32 RS485 support. */ };
+		inline void clear_txen() { /* Automagically managed by ESP32 RS485 support. */ };
+		inline void tx_byte(uint8_t c);
+		inline void tx_delay_byte();
+		inline void set_udrie() { udre = true; }
+		inline void clear_udrie() { udre = false; }
+		inline static void onReceive();
+		inline static void onReceiveError(hardwareSerial_error_t error);
+
+		RS485Slave(int uart_nr);
 #else
 		inline void set_txen() { *ucsrb &= ~((1<<RXEN0) | (1<<RXCIE0)); *txen_port |= txen_pin_mask; *ucsrb |= (1<<TXEN0) | (1<<TXCIE0); };
 		inline void clear_txen() { *ucsrb &= ~((1<<TXEN0) | (1<<TXCIE0)); *txen_port &= ~txen_pin_mask; *ucsrb |= (1<<RXEN0) | (1<<RXCIE0); };

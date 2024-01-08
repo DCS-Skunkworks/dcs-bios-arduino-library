@@ -4,13 +4,30 @@ namespace DcsBios {
 #ifdef DCSBIOS_FOR_STM32
 	RS485Slave::RS485Slave(usart_dev *usart, uint32_t txen_pin) :
 	udr(&usart->regs->DR), usart_sr(&usart->regs->SR), usart_cr1(&usart->regs->CR1), usart_cr2(&usart->regs->CR2), usart_cr3(&usart->regs->CR3), usart_brr(&usart->regs->BRR)
+#elif defined(DCSBIOS_FOR_ESP32)
+	HardwareSerial HSerial(DCSBIOS_RS485_UART);
+
+	RS485Slave::RS485Slave(int uart_nr) : uart_nr(uart_nr)
 #else
 	RS485Slave::RS485Slave(volatile uint8_t *udr, volatile uint8_t *ucsra, volatile uint8_t *ucsrb, volatile uint8_t *ucsrc, uint8_t txen_pin) :
 	udr(udr), ucsra(ucsra), ucsrb(ucsrb), ucsrc(ucsrc)
 #endif
 	{
+	#ifndef DCSBIOS_FOR_ESP32
 		txen_port = portOutputRegister(digitalPinToPort(txen_pin));
 		txen_pin_mask = digitalPinToBitMask(txen_pin);
+	#else
+		HSerial.setPins(DCSBIOS_RS485_RX, DCSBIOS_RS485_TX, -1, TXENABLE_PIN);
+		HSerial.setHwFlowCtrlMode(HW_FLOWCTRL_DISABLE);
+		HSerial.setMode(UART_MODE_RS485_HALF_DUPLEX);
+		HSerial.setRxTimeout(0);
+		HSerial.setRxFIFOFull(1);
+		HSerial.setRxBufferSize(256);
+		HSerial.setTxBufferSize(128); // Minimum 128 on ESP32 is 128
+		HSerial.onReceive(onReceive, false);
+		HSerial.onReceiveError(onReceiveError);
+	#endif
+		
 		state = UNINITIALIZED;
 	}
 	
@@ -61,7 +78,13 @@ namespace DcsBios {
 	}
 	
 	void RS485Slave::rxISR() {
+	#ifdef DCSBIOS_FOR_ESP32
+		if (HSerial.available() < 1) { return; }
+		uint8_t c = HSerial.read();
+	#else
 		volatile uint8_t c = *udr;
+	#endif
+
 		switch(state) {
 			case UNINITIALIZED:
 				last_rx_time = micros();
@@ -182,7 +205,7 @@ namespace DcsBios {
 		
 	}
 
-	#ifdef DCSBIOS_FOR_STM32
+#ifdef DCSBIOS_FOR_STM32
 	void RS485Slave::UsartIRQ()	{
 		if((*usart_sr & (1<<USART_SR_TXE_BIT)) && udrie_set)
 		{
@@ -212,20 +235,42 @@ namespace DcsBios {
 		*rs485slave.usart_brr = 288; //Baud = fck/BRR = 72MHz / 288 = 250000bps
 		//*rs485slave.usart_brr = 336;  //Baud = fck/BRR = 84MHz / 336 = 250000bps
 		pinMode(TXENABLE_PIN, OUTPUT);
-#if 1 // F103
+	#if 1 // F103
 		gpio_set_mode(GPIOA, 9, GPIO_AF_OUTPUT_PP);
 		gpio_set_mode(GPIOA, 10, GPIO_INPUT_FLOATING);
-#else  // F407
+	#else  // F407
 		gpio_set_mode(PB6, GPIO_AF_OUTPUT_PP);
 		gpio_set_mode(PB7, GPIO_AF_OUTPUT_PP);
 		gpio_set_af_mode(PB6, 7);
 		gpio_set_af_mode(PB7, 7);
-#endif
+	#endif
 		nvic_irq_enable(NVIC_USART1);
 		rs485slave.clear_txen();
 	}
-#else	
-	RS485Slave rs485slave(&UDR0, &UCSR0A, &UCSR0B, &UCSR0C, TXENABLE_PIN);	
+#elif defined(DCSBIOS_FOR_ESP32)
+	RS485Slave rs485slave(DCSBIOS_RS485_UART);
+	
+	void setup() {
+		HSerial.begin(250000, SERIAL_8N1, DCSBIOS_RS485_RX, DCSBIOS_RS485_TX);
+	}
+	
+	void RS485Slave::onReceive() {
+		rs485slave.rxISR();
+	}
+
+	void RS485Slave::onReceiveError(hardwareSerial_error_t error) {
+		Serial.println("HardwareSerial Error: " + error);
+	}
+
+	void RS485Slave::tx_byte(uint8_t c) {
+		HSerial.write(c);
+	}
+
+	void RS485Slave::tx_delay_byte() {
+		tx_byte(0);
+	}
+#else
+	RS485Slave rs485slave(&UDR0, &UCSR0A, &UCSR0B, &UCSR0C, TXENABLE_PIN);
 	ISR(USART0_RX_vect) { rs485slave.rxISR(); }
 	ISR(USART0_TX_vect) { rs485slave.txcISR(); }
 	ISR(USART0_UDRE_vect) { rs485slave.udreISR(); }
@@ -241,7 +286,7 @@ namespace DcsBios {
 		rs485slave.clear_txen();
 	}
 #endif
-	
+
 	void loop() {
 		PollingInput::pollInputs();
 		ExportStreamListener::loopAll();
@@ -251,6 +296,18 @@ namespace DcsBios {
 		if (!parser.incomingDataBuffer.isEmpty()) {
 			unsigned char nextByte = parser.incomingDataBuffer.get();
 			parser.processChar(nextByte);
+		}
+		#endif
+
+		/* Simulate TX interrupts for ESP32 as those are not exposed by HardwareSerial
+			At the moment, this is called on every loop() and the ESP32 should be able to handle that,
+			if not, some kind of rate limiting will need to be implemented.
+		*/
+		#ifdef DCSBIOS_FOR_ESP32
+		rs485slave.txcISR();
+
+		if (rs485slave.udre) {
+			rs485slave.udreISR();
 		}
 		#endif
 	}
