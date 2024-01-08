@@ -5,7 +5,12 @@
 #include <ESPmDNS.h>
 
 #ifndef DCSBIOS_ESP32_WIFI_SSID
-    #include <EthernetClient.h>
+#ifdef DCSBIOS_ESP32_WIZNET
+	#include <Ethernet_Generic.h> // khoih-prog/Ethernet_Generic@^2.8.1
+#endif
+#ifdef DCSBIOS_ESP32_ENC28J60
+	#include <Ethernet.h> // jandrassy/EthernetENC@^2.0.4
+#endif
 #endif
 
 namespace DcsBios {
@@ -170,7 +175,7 @@ namespace DcsBios {
                 master_ip = DCSBIOS_ESP32_MASTER_IP;
                 master_port = DCSBIOS_ESP32_MASTER_PORT;
 
-                Serial.println("Using static master address: " + String(DCSBIOS_ESP32_MASTER_IP) + ":" + String(DCSBIOS_ESP32_MASTER_PORT));
+                Serial.println("Using static master address: " + DCSBIOS_ESP32_MASTER_IP.toString() + ":" + String(DCSBIOS_ESP32_MASTER_PORT));
 
                 return true;
             #endif
