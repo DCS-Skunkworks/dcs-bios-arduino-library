@@ -65,7 +65,8 @@ namespace DcsBios {
 	bool ESP32NetworkedSlave::connect_ethernet() {
 		#ifndef DCSBIOS_ESP32_WIFI_SSID
 		Ethernet.init(DCSBIOS_ESP32_ETHERNET_CS);
-
+		Ethernet.setHostname((String("dcs-") + DCSBIOS_ESP32_ID).c_str());
+		
 		Serial.println("Initialize Ethernet with DHCP:");
 		
 		uint8_t mac[6];
