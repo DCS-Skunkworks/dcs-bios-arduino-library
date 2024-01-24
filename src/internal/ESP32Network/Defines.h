@@ -65,9 +65,14 @@
 #ifdef DCSBIOS_ESP32_WIZNET
 	#define _ETG_LOGLEVEL_ 1
 	#define ETHERNET_LARGE_BUFFERS
+	#define USING_SPI2 true // This is just to make the library happy, SPI is selected below
 
 	#ifdef DCSBIOS_ESP32_ETHERNET_HSPI
-		#define USING_SPI2 true
+		#define SPI_BUS HSPI
+	#endif
+
+	#ifdef DCSBIOS_ESP32_ETHERNET_FSPI
+		#define SPI_BUS FSPI
 	#endif
 
 	#ifdef DCSBIOS_ESP32_ETHERNET_SCK
