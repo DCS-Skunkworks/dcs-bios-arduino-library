@@ -30,7 +30,7 @@
     "adafruit/Adafruit NeoPixel": "^1.11.0",
     "nanopb/Nanopb": "^0.4.7",
     "esphome/AsyncTCP-esphome": "^2.0.1",
-    "Ethernet_Generic": "https://github.com/maciekish/Ethernet_Generic.git#master",
+    "Ethernet_Generic": "https://github.com/maciekish/Ethernet_Generic.git#main",
     "jandrassy/EthernetENC": "^2.0.4"
   }
 }
