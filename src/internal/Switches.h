@@ -283,6 +283,10 @@ namespace DcsBios {
 		char numberOfPins_;
 		char lastState_;
 		bool reverse_;
+		char debounceSteadyState_;
+		unsigned long debounceDelay_;
+		unsigned long lastDebounceTime = 0;
+	  
 		char readState() {
 			unsigned char ncPinIdx = lastState_;
 			for (unsigned char i=0; i<numberOfPins_; i++) {
@@ -302,16 +306,23 @@ namespace DcsBios {
 		}
 		void pollInput() {
 			char state = readState();
-			if (state != lastState_)
-			{
-				char buf[7];
-				utoa(state, buf, 10);
-				if (tryToSendDcsBiosMessage(msg_, buf))
+			unsigned long now = millis();
+			if (state != debounceSteadyState_) {
+				lastDebounceTime = now;
+				debounceSteadyState_ = state;
+			}
+
+			if ((now - lastDebounceTime) >= debounceDelay_) {
+				if (state != lastState_) {
+					char buf[7];
+					utoa(state, buf, 10);
+					if (tryToSendDcsBiosMessage(msg_, buf))
 					lastState_ = state;
+				}
 			}
 		}
 	public:
-		SwitchMultiPosT(const char* msg, const byte* pins, char numberOfPins, bool reverse = false) :
+		SwitchMultiPosT(const char* msg, const byte* pins, char numberOfPins, bool reverse = false, unsigned long debounceDelay = 50) :
 			PollingInput(pollIntervalMs),
 			lastState_(0)
 		{
@@ -325,6 +336,8 @@ namespace DcsBios {
 					pinMode(pins[i], INPUT_PULLUP);
 			}
 			lastState_ = readState();
+			debounceSteadyState_ = lastState_;
+			debounceDelay_ = debounceDelay;			
 		}
 		
 		void SetControl( const char* msg )
