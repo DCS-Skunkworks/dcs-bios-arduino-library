@@ -53,61 +53,164 @@ namespace DcsBios {
 			}
 	};
 	typedef Matrix2PosT<> Matrix2Pos;
-	
+
 	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
 	class Matrix3PosT : PollingInput, public ResettableInput {
-		private:
-			const char* msg_;
-			char rowA_;
-			char colA_;
-			char rowB_;
-			char colB_;
-			char lastState_;
-			char readState() {
-				if (swPanel.GetSwitchState(rowA_, colA_) == true) return 0;
-				if (swPanel.GetSwitchState(rowB_, colB_) == true) return 2;
-				return 1;
-			}
-			void resetState()
-			{
-				lastState_ = (lastState_==0)?-1:0;
-			}
-			void pollInput() {
-				char state = readState();
-				if (state != lastState_) {
-					if (state == 0) {
-						if (tryToSendDcsBiosMessage(msg_, "0")) {
-							lastState_ = state;
-						}
+	private:
+		const char* msg_;
+		char rowA_;
+		char colA_;
+		char rowB_;
+		char colB_;
+		char lastState_;
+		char readState() {
+			if (swPanel.GetSwitchState(rowA_, colA_) == true) return 0;
+			if (swPanel.GetSwitchState(rowB_, colB_) == true) return 2;
+			return 1;
+		}
+		void resetState()
+		{
+			lastState_ = (lastState_==0)?-1:0;
+		}
+		void pollInput() {
+			char state = readState();
+			if (state != lastState_) {
+				if (state == 0) {
+					if (tryToSendDcsBiosMessage(msg_, "0")) {
+						lastState_ = state;
 					}
-					else if (state == 1) {
-						if (tryToSendDcsBiosMessage(msg_, "1")) {
-							lastState_ = state;
-						}
+				}
+				else if (state == 1) {
+					if (tryToSendDcsBiosMessage(msg_, "1")) {
+						lastState_ = state;
 					}
-					else if (state == 2) {
-						if(tryToSendDcsBiosMessage(msg_, "2")){
-							lastState_ = state;
-						}
+				}
+				else if (state == 2) {
+					if(tryToSendDcsBiosMessage(msg_, "2")){
+						lastState_ = state;
 					}
 				}
 			}
-		public:
-			Matrix3PosT(const char* msg, char rowA, char colA, char rowB, char colB) : PollingInput(pollIntervalMs)
-			{
-				msg_ = msg;
-				colA_ = colA;
-				rowA_ = rowA;
-				colB_ = colB;
-				rowB_ = rowB;
-				lastState_ = readState();
-			}
+		}
+	public:
+		Matrix3PosT(const char* msg, char rowA, char colA, char rowB, char colB) : PollingInput(pollIntervalMs)
+		{
+			msg_ = msg;
+			colA_ = colA;
+			rowA_ = rowA;
+			colB_ = colB;
+			rowB_ = rowB;
+			lastState_ = readState();
+		}
 
-			void resetThisState()
-			{
-				this->resetState();
-			}
+		void resetThisState()
+		{
+			this->resetState();
+		}
 	};
 	typedef Matrix3PosT<> Matrix3Pos;
+
+	// MatSwitches
+
+	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
+	class MatSwitch2PosT : PollingInput, public ResettableInput {
+	private:
+		const char* msg_;
+		char lastState_;
+		volatile unsigned char* address_;
+
+		char readState() {
+			if (*address_ == LOW) return 1;
+			return 0;
+		}
+
+		void pollInput() {
+			char state = readState();
+			if (state != lastState_) {
+				if(state == 0) {
+					if (tryToSendDcsBiosMessage(msg_, "0" )) { // translate state to "0", "1" or "2"
+						lastState_ = state;
+					}
+				} else if (state == 1) {
+					if (tryToSendDcsBiosMessage(msg_, "1" )) { // translate state to "0", "1" or "2"
+						lastState_ = state;
+					}
+				}
+			}
+		}
+
+		void resetState()
+		{
+			lastState_ = (lastState_ == 0) ? -1 : 0;
+		}
+
+	public:
+		MatSwitch2PosT(const char* msg, volatile unsigned char* address) : PollingInput(pollIntervalMs)
+		{
+			msg_ = msg;
+			address_ = address;
+			lastState_ = readState();
+		}
+
+		void resetThisState()
+		{
+			this->resetState();
+		}
+	};
+	typedef MatSwitch2PosT <> MatSwitch2Pos;
+
+	template <unsigned long pollIntervalMs = POLL_EVERY_TIME>
+	class MatSwitch3PosT : PollingInput, public ResettableInput {
+	private:
+		const char* msg_;
+		char lastState_;
+		volatile unsigned char* address1_;
+		volatile unsigned char* address2_;
+
+		char readState() {
+			if (*address1_ == LOW) return 0;
+			if (*address2_ == LOW) return 2;
+			return 1;
+		}
+
+		void pollInput() {
+			char state = readState();
+			if (state != lastState_) {
+				if(state == 0) {
+					if (tryToSendDcsBiosMessage(msg_, "0" )) { // translate state to "0", "1" or "2"
+						lastState_ = state;
+					}
+				} else if (state == 1) {
+					if (tryToSendDcsBiosMessage(msg_, "1" )) { // translate state to "0", "1" or "2"
+						lastState_ = state;
+					}
+				} else if (state == 2) {
+					if (tryToSendDcsBiosMessage(msg_, "2" )) { // translate state to "0", "1" or "2"
+						lastState_ = state;
+					}
+				}
+			}
+		}
+
+		void resetState()
+		{
+			lastState_ = (lastState_ == 0) ? -1 : 0;
+		}
+
+	public:
+		MatSwitch3PosT(const char* msg, volatile unsigned char* address1, volatile unsigned char* address2) : PollingInput(pollIntervalMs)
+		{
+			msg_ = msg;
+			address1_ = address1;
+			address2_ = address2;
+			lastState_ = readState();
+		}
+
+		void resetThisState()
+		{
+			this->resetState();
+		}
+	};
+	typedef MatSwitch3PosT<> MatSwitch3Pos;
 }
 #endif	

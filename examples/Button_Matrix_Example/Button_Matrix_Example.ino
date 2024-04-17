@@ -75,8 +75,12 @@ DcsBios::MatActionButton ufcClr("UFC_CLR", "TOGGLE", &in_mat[3][0]);
 DcsBios::MatActionButton ufc0("UFC_0", "TOGGLE", &in_mat[3][1]);
 DcsBios::MatActionButton ufcEnt("UFC_ENT", "TOGGLE", &in_mat[3][2]);*/
 
-DcsBios::Matrix2Pos aapCdupwr("AAP_CDUPWR", 2, 2);
-DcsBios::Matrix3Pos ahcpAltSce("AHCP_ALT_SCE", 1, 2, 1, 2);
+// external library dependent
+/*DcsBios::Matrix2Pos aapCdupwr("AAP_CDUPWR", 2, 2);
+DcsBios::Matrix3Pos ahcpAltSce("AHCP_ALT_SCE", 1, 2, 1, 2);*/
+
+DcsBios::MatSwitch2Pos aapCdupwr("AAP_CDUPWR", &in_mat[2][2]);
+DcsBios::MatSwitch3Pos ahcpAltSce("AHCP_ALT_SCE", &in_mat[3][2], &in_mat[2][3]);
 
 // The setup() function runs once each time the micro-controller starts
 void setup() {
