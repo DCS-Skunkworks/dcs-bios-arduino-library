@@ -254,5 +254,9 @@ namespace DcsBios {
 		}
 		#endif
 	}
+
+	void resetAllStates() {
+		PollingInput::resetAllStates();
+	}
 }
 #endif
