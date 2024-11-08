@@ -4,13 +4,15 @@
 
 // Check for Arduino Mega when using UART 1,2 or 3
 #if defined (UART1_SELECT) || defined(UART2_SELECT) || defined(UART3_SELECT)
-	#if not (defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1280__))
+	#if defined(__AVR_ATmega32U4__) && (defined (UART2_SELECT) || defined (UART3_SELECT))
+		#error The RS485Slave sketch requires an Arduino Mega for UART 2 or UART 3!
+	#elseif not (defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1280__))
 	    #error The RS485Slave sketch requires an Arduino Mega for UART 1, UART 2 or UART 3!
 	#endif
 #endif
 
 #include "Arduino.h"
-#include "RingBuffer.h"
+#include "../RingBuffer.h"
 
 namespace DcsBios {
 	
@@ -87,8 +89,8 @@ namespace DcsBios {
 		void udreISR();
 		void txcISR();
 
-		// Arduino Mega UART 1
-		#ifdef UART1_SELECT
+		// Arduino Mega UART 1 or Arduino ProMicro
+		#if defined(UART1_SELECT) || defined(__AVR_ATmega32U4__)
 			inline void set_txen() { *ucsrb &= ~((1<<RXEN1) | (1<<RXCIE1)); *txen_port |= txen_pin_mask; *ucsrb |= (1<<TXEN1) | (1<<TXCIE1); };
 			inline void clear_txen() { *ucsrb &= ~((1<<TXEN1) | (1<<TXCIE1)); *txen_port &= ~txen_pin_mask; *ucsrb |= (1<<RXEN1) | (1<<RXCIE1); };
 			inline void tx_byte(uint8_t c) { set_txen(); *udr = c; *ucsra |= (1<<TXC1); }
