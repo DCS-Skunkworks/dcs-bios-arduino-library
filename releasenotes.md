@@ -1,3 +1,7 @@
+## v0.3.10
+- Updated Addresses.h to the latest version
+- Updated metadata for publishing to Arduino Library Manager and PlatformIO Registry.
+
 ## v0.3.9
 - Included Addresses.h as an alternative way of including DCS address/mask information.  [Documentation needed].  Thanks @maciekish for the contribution!!
 - Example of PotentiometerEWMA added to OneOfEverything
