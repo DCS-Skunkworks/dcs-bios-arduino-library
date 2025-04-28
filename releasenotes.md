@@ -1,3 +1,9 @@
+## v0.3.11
+- MatSwitch2Pos & MatSwitch3Pos added by msmarino (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/59)
+- Esp32 wifi by maciekish (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/83)
+- Fixes for RS485 dropping data on AVR MCUs.  Thanks maciekish! (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/52)
+- Add RS485 slave support for 32u4 processor for leomar75 (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/79)
+
 ## v0.3.10
 - Updated Addresses.h to the latest version
 - Updated metadata for publishing to Arduino Library Manager and PlatformIO Registry.
