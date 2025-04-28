@@ -1,5 +1,7 @@
 # DCS-BIOS Arduino Library
 
+> DCS-Skunkworks is looking for additional contributors for this repository.  If you have strong C coding skills and a passion for DCS-BIOS, please contact talbotmcinnis@alumni.uwo.ca
+
 This is an Arduino library that makes it easy to write sketches that talk to DCS-BIOS.
 
 For more information and documentation, see the [DCS-BIOS FlightPanels Project](https://github.com/DCSFlightpanels).  The example "OneOfEverything" is a good place to start looking for controls to use.
