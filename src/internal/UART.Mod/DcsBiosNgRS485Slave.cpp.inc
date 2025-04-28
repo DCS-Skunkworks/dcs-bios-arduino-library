@@ -172,8 +172,8 @@ namespace DcsBios {
 		
 	}
 
-	// Arduino Mega UART 1
-	#ifdef UART1_SELECT
+	// Arduino Mega UART 1 or Arduino ProMicro
+	#if defined(UART1_SELECT) || defined(__AVR_ATmega32U4__)
 		RS485Slave rs485slave(&UDR1, &UCSR1A, &UCSR1B, &UCSR1C, TXENABLE_PIN);	
 		ISR(USART1_RX_vect) { rs485slave.rxISR(); }
 		ISR(USART1_TX_vect) { rs485slave.txcISR(); }
@@ -204,8 +204,8 @@ namespace DcsBios {
 
 	void setup() {
 
-		// Arduino Mega UART 1
-		#ifdef UART1_SELECT
+		// Arduino Mega UART 1 or Arduino ProMicro
+		#if defined(UART1_SELECT) || defined(__AVR_ATmega32U4__)
 			PRR1 &= ~(0<<PRUSART1); // PRR1 Bit 0 - PRUSART1: Power Reduction USART1
 			UBRR1H = 0;
 			UBRR1L = 3; // 250000 bps
