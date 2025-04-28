@@ -14,6 +14,7 @@
 #include "internal/ExportStreamListener.h"
 #include "internal/PollingInput.h"
 #include "internal/Protocol.h"
+#include "internal/Protocol.cpp.inc" // Needs to be a .cpp.inc to allow DCSBIOS_INCOMING_DATA_BUFFER_SIZE
 #include "internal/Addresses.h"
 
 

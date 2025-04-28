@@ -107,7 +107,12 @@ namespace DcsBios {
 			case RX_WAIT_DATA:
 				rxtx_len--;
 				if (rx_datatype == RXDATA_DCSBIOS_EXPORT) {
-					parser.processCharISR(c);
+					if (rxtx_len <= parser.incomingDataBuffer.availableForWrite()) {
+						parser.processCharISR(c);
+					} else {
+						last_rx_time = micros();
+						state = SYNC;
+					}
 				}
 				if (rxtx_len == 0) {
 					state = RX_WAIT_CHECKSUM;
@@ -240,6 +245,14 @@ namespace DcsBios {
 	void loop() {
 		PollingInput::pollInputs();
 		ExportStreamListener::loopAll();
+
+		// Process incoming data outside of ISR
+		#ifdef DCSBIOS_DEFER_RS485_PROCESSING
+		if (!parser.incomingDataBuffer.isEmpty()) {
+			unsigned char nextByte = parser.incomingDataBuffer.get();
+			parser.processChar(nextByte);
+		}
+		#endif
 	}
 
 	void resetAllStates() {

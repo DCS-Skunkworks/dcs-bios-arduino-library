@@ -16,6 +16,7 @@ namespace DcsBios {
 		__attribute__((always_inline)) uint8_t get() { uint8_t ret = buffer[readpos]; readpos = ++readpos % SIZE; return ret; }
 		__attribute__((always_inline)) uint8_t getLength() { return (uint8_t)(writepos - readpos) % SIZE; }
 		__attribute__((always_inline)) void clear() { readpos = 0; writepos = 0; }
+		__attribute__((always_inline)) uint8_t availableForWrite() { return SIZE - getLength() - 1; }
 	};
 }
 
