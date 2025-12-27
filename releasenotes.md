@@ -1,3 +1,6 @@
+## v0.3.12
+- Updated Addresses.h to the latest version in the DCS-BIOS for the F/A18C Hornet
+
 ## v0.3.11
 - MatSwitch2Pos & MatSwitch3Pos added by msmarino (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/59)
 - Esp32 wifi by maciekish (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/83)
