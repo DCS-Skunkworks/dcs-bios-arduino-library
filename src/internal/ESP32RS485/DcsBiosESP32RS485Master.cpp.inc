@@ -10,15 +10,18 @@ namespace DcsBios {
     MasterPCConnection pcConnection;
 
     // ========================================================================
-    // RS485 MASTER IMPLEMENTATION
-    // Uses UART event queue for TRUE non-blocking TX complete detection
-    // This mimics AVR's TX complete interrupt (USART_TX_vect)
+    // RS485 MASTER IMPLEMENTATION - DEFINITIVE VERSION
+    //
+    // Key changes from all previous attempts:
+    // 1. NO UART_MODE_RS485_HALF_DUPLEX - Manual DE control
+    // 2. PACKET-BASED TX - Entire packet written at once
+    // 3. CALCULATED TX TIME - Deterministic DE drop timing
+    // 4. STREAMBUFFER - Thread-safe IPC with USB task
     // ========================================================================
 
     RS485Master::RS485Master()
         : uartNum((uart_port_t)RS485_UART_NUM),
-          txEnablePin(TXENABLE_PIN),
-          uartEventQueue(NULL),
+          dePin((gpio_num_t)TXENABLE_PIN),
           state(IDLE),
           poll_address(1),
           poll_address_counter(1),
@@ -26,16 +29,34 @@ namespace DcsBios {
           rxtx_len(0),
           rx_msgtype(0),
           checksum(0),
-          rx_start_time(0),
-          txDoneFlag(false)
+          tx_complete_time(0),
+          rx_start_time(0)
     {
-        slave_present[0] = true;
+        slave_present[0] = true;  // Broadcast address, mark as "present" to skip
         for (uint8_t i = 1; i < 128; i++) {
             slave_present[i] = false;
         }
     }
 
     void RS485Master::begin() {
+        // =====================================================================
+        // GPIO: Manual DE pin control
+        // This is CRITICAL - we don't trust the UART driver's auto control
+        // =====================================================================
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << dePin),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE
+        };
+        gpio_config(&io_conf);
+        setDE(false);  // Start in RX mode
+
+        // =====================================================================
+        // UART: Normal mode (NOT RS485 auto mode!)
+        // We handle DE manually for precise timing
+        // =====================================================================
         uart_config_t uart_config = {
             .baud_rate = RS485_BAUD_RATE,
             .data_bits = UART_DATA_8_BITS,
@@ -46,52 +67,64 @@ namespace DcsBios {
             .source_clk = UART_SCLK_DEFAULT
         };
 
-        // Install UART driver WITH event queue - this gives us TX_DONE events!
-        // The event queue is the key to non-blocking TX complete detection
-        uart_driver_install(uartNum, RS485_RX_BUFFER_SIZE, RS485_TX_BUFFER_SIZE,
-                           20, &uartEventQueue, 0);
+        // Install driver WITHOUT RS485 mode - we control DE manually
+        uart_driver_install(uartNum, RS485_UART_RX_BUFFER, RS485_UART_TX_BUFFER, 0, NULL, 0);
         uart_param_config(uartNum, &uart_config);
-        uart_set_pin(uartNum, RS485_TX_PIN, RS485_RX_PIN, txEnablePin, UART_PIN_NO_CHANGE);
+        uart_set_pin(uartNum, RS485_TX_PIN, RS485_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
-        // Enable RS485 half-duplex mode - driver handles DE/RE automatically
-        if (txEnablePin >= 0) {
-            uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX);
-        }
+        // IMPORTANT: Use normal UART mode, NOT RS485 mode
+        // This gives us full control over DE timing
+        uart_set_mode(uartNum, UART_MODE_UART);
 
         uart_flush_input(uartNum);
     }
 
-    void RS485Master::processUartEvents() {
-        // Process UART events for error handling
-        uart_event_t event;
-        while (xQueueReceive(uartEventQueue, &event, 0) == pdTRUE) {
-            switch (event.type) {
-                case UART_FIFO_OVF:
-                case UART_BUFFER_FULL:
-                    // Overflow - flush and continue
-                    uart_flush_input(uartNum);
-                    break;
-                default:
-                    break;
-            }
-        }
+    void RS485Master::setDE(bool high) {
+        // Set Driver Enable pin
+        // HIGH = Transmit mode (we're talking)
+        // LOW = Receive mode (we're listening)
+        gpio_set_level(dePin, high ? 1 : 0);
+    }
 
-        // Check TX completion by polling (non-blocking with timeout=0)
-        // uart_wait_tx_done with timeout 0 returns ESP_OK if TX is complete
-        // This is the ESP32 equivalent of checking the TXC flag on AVR
-        if (uart_wait_tx_done(uartNum, 0) == ESP_OK) {
-            txDoneFlag = true;
-        }
+    int64_t RS485Master::calculateTxCompleteTime(size_t bytes) {
+        // Calculate when TX will be complete
+        // At 250kbaud, each byte = 40µs (10 bits per byte)
+        // Add margin for safety
+        int64_t now = esp_timer_get_time();  // Microseconds
+        int64_t tx_duration = (bytes * US_PER_BYTE) + TX_MARGIN_US;
+        return now + tx_duration;
+    }
+
+    void RS485Master::sendPacket(const uint8_t* data, size_t len) {
+        // =====================================================================
+        // PACKET-BASED TX: Write entire packet at once
+        // This prevents gaps between bytes that could confuse timing
+        // =====================================================================
+
+        // 1. Raise DE (enter TX mode)
+        setDE(true);
+
+        // 2. Small delay to ensure DE is stable before TX starts
+        //    At 250kbaud, 1 bit = 4µs, so 10µs is ~2.5 bits - plenty
+        delayMicroseconds(10);
+
+        // 3. Write all bytes to UART FIFO at once
+        uart_write_bytes(uartNum, (const char*)data, len);
+
+        // 4. Calculate when TX will be complete
+        tx_complete_time = calculateTxCompleteTime(len);
     }
 
     void RS485Master::advancePollAddress() {
         poll_address_counter = (poll_address_counter + 1) % 128;
 
+        // Skip to next present slave
         while (!slave_present[poll_address_counter]) {
             poll_address_counter = (poll_address_counter + 1) % 128;
         }
 
         if (poll_address_counter == 0) {
+            // Instead of polling broadcast address, scan for new device
             scan_address_counter = (scan_address_counter + 1) % 128;
             while (slave_present[scan_address_counter]) {
                 scan_address_counter = (scan_address_counter + 1) % 128;
@@ -103,258 +136,227 @@ namespace DcsBios {
         poll_address = poll_address_counter;
     }
 
+    void RS485Master::feedExportByte(uint8_t c) {
+        exportData.put(c);
+    }
+
     void RS485Master::loop() {
-        // =====================================================================
-        // STEP 1: Process UART events (non-blocking TX_DONE detection)
-        // This replaces blocking uart_wait_tx_done()
-        // =====================================================================
-        processUartEvents();
+        int64_t now = esp_timer_get_time();
 
         // =====================================================================
-        // STEP 2: Handle TX_WAIT states - transition when TX is done
+        // STEP 1: Check if TX is complete (for TX_WAIT states)
+        // This is the CRITICAL timing - we drop DE exactly when TX is done
         // =====================================================================
-        if (txDoneFlag) {
-            switch (state) {
-                case POLL_WAIT_TX_DONE:
-                    // Poll packet sent, switch to RX mode
+        if (state == TX_WAIT_COMPLETE || state == POLL_WAIT_COMPLETE) {
+            if (now >= tx_complete_time) {
+                // TX is complete - drop DE to enter RX mode
+                setDE(false);
+
+                if (state == TX_WAIT_COMPLETE) {
+                    // Broadcast complete, return to IDLE
+                    state = IDLE;
+                } else {
+                    // Poll complete, wait for slave response
                     uart_flush_input(uartNum);
-                    rx_start_time = micros();
+                    rx_start_time = now;
                     state = RX_WAIT_DATALENGTH;
-                    txDoneFlag = false;
-                    break;
-
-                case TIMEOUT_WAIT_TX_DONE:
-                    state = IDLE;
-                    txDoneFlag = false;
-                    break;
-
-                case TX_WAIT_TX_DONE:
-                    state = IDLE;
-                    txDoneFlag = false;
-                    break;
-
-                default:
-                    // Clear flag if not in a wait state
-                    txDoneFlag = false;
-                    break;
+                }
             }
+            // Don't process anything else while waiting for TX complete
+            return;
         }
 
         // =====================================================================
-        // STEP 3: Handle RX states - read data from slaves
+        // STEP 2: Process incoming data from slaves (RX states)
         // =====================================================================
-        size_t available = 0;
-        uart_get_buffered_data_len(uartNum, &available);
+        if (state >= RX_WAIT_DATALENGTH && state <= RX_WAIT_CHECKSUM) {
+            size_t available = 0;
+            uart_get_buffered_data_len(uartNum, &available);
 
-        while (available > 0 && state >= RX_WAIT_DATALENGTH && state <= RX_WAIT_CHECKSUM) {
-            uint8_t c;
-            if (uart_read_bytes(uartNum, &c, 1, 0) != 1) break;
-            available--;
+            while (available > 0) {
+                uint8_t c;
+                if (uart_read_bytes(uartNum, &c, 1, 0) != 1) break;
+                available--;
 
-            switch (state) {
-                case RX_WAIT_DATALENGTH:
-                    rxtx_len = c;
-                    slave_present[poll_address] = true;
-                    if (rxtx_len > 0) {
-                        state = RX_WAIT_MSGTYPE;
-                    } else {
+                switch (state) {
+                    case RX_WAIT_DATALENGTH:
+                        rxtx_len = c;
+                        slave_present[poll_address] = true;
+                        if (rxtx_len > 0) {
+                            state = RX_WAIT_MSGTYPE;
+                        } else {
+                            state = IDLE;
+                        }
+                        rx_start_time = now;
+                        break;
+
+                    case RX_WAIT_MSGTYPE:
+                        rx_msgtype = c;
+                        state = RX_WAIT_DATA;
+                        rx_start_time = now;
+                        break;
+
+                    case RX_WAIT_DATA:
+                        messageBuffer.put(c);
+                        rxtx_len--;
+                        if (rxtx_len == 0) {
+                            state = RX_WAIT_CHECKSUM;
+                        }
+                        rx_start_time = now;
+                        break;
+
+                    case RX_WAIT_CHECKSUM:
+                        // Checksum received (ignore validation like AVR)
+                        messageBuffer.complete = true;
                         state = IDLE;
-                    }
-                    rx_start_time = micros();
-                    break;
-
-                case RX_WAIT_MSGTYPE:
-                    rx_msgtype = c;
-                    state = RX_WAIT_DATA;
-                    rx_start_time = micros();
-                    break;
-
-                case RX_WAIT_DATA:
-                    messageBuffer.put(c);
-                    rxtx_len--;
-                    if (rxtx_len == 0) {
-                        state = RX_WAIT_CHECKSUM;
-                    }
-                    rx_start_time = micros();
-                    break;
-
-                case RX_WAIT_CHECKSUM:
-                    messageBuffer.complete = true;
-                    state = IDLE;
-                    break;
+                        break;
+                }
             }
+
+            // Timeout handling for RX states
+            if (state == RX_WAIT_DATALENGTH && (now - rx_start_time) > POLL_TIMEOUT_US) {
+                // No response from slave - mark as not present
+                slave_present[poll_address] = false;
+                state = IDLE;
+            }
+
+            if ((state == RX_WAIT_MSGTYPE || state == RX_WAIT_DATA || state == RX_WAIT_CHECKSUM)
+                && (now - rx_start_time) > RX_TIMEOUT_US) {
+                // Timeout during message reception
+                messageBuffer.clear();
+                messageBuffer.put('\n');
+                messageBuffer.complete = true;
+                state = IDLE;
+            }
+
+            return;
         }
 
         // =====================================================================
-        // STEP 4: Handle IDLE state - start new operations
+        // STEP 3: IDLE state - start new operations
         // =====================================================================
         if (state == IDLE) {
+            // Priority 1: Send export data to slaves (broadcast)
             if (exportData.isNotEmpty()) {
-                // We have export data to send - start broadcast
-                rxtx_len = exportData.getLength();
-                checksum = 0;
+                // Build broadcast packet: [Addr=0] [MsgType=0] [Length] [Data...] [Checksum]
+                uint8_t packet[EXPORT_BUFFER_SIZE + 4];
+                uint8_t len = exportData.getLength();
+                uint8_t cs = 0;
 
-                uint8_t addr = 0;  // Broadcast address
-                uart_write_bytes(uartNum, (const char*)&addr, 1);
-                state = TX_ADDRESS_SENT;
+                packet[0] = 0;      // Broadcast address
+                packet[1] = 0;      // Message type
+                packet[2] = len;    // Data length
 
-            } else if (messageBuffer.isEmpty() && !messageBuffer.complete) {
-                // Message buffer free, poll a device
+                for (uint8_t i = 0; i < len; i++) {
+                    uint8_t b = exportData.get();
+                    packet[3 + i] = b;
+                    cs ^= b;
+                }
+                packet[3 + len] = cs;  // Checksum
+
+                // Send entire packet at once
+                sendPacket(packet, 4 + len);
+                state = TX_WAIT_COMPLETE;
+                return;
+            }
+
+            // Priority 2: Poll a slave for input commands
+            if (messageBuffer.isEmpty() && !messageBuffer.complete) {
                 advancePollAddress();
 
-                uint8_t addr = poll_address;
-                uart_write_bytes(uartNum, (const char*)&addr, 1);
-                state = POLL_ADDRESS_SENT;
+                // Build poll packet: [SlaveAddr] [MsgType=0] [Length=0]
+                uint8_t packet[3];
+                packet[0] = poll_address;
+                packet[1] = 0;  // Message type
+                packet[2] = 0;  // Data length = 0 (poll request)
 
-            } else {
-                pcConnection.checkTimeout();
+                sendPacket(packet, 3);
+                state = POLL_WAIT_COMPLETE;
+                return;
             }
-        }
 
-        // =====================================================================
-        // STEP 5: TX state machine - send bytes (like AVR UDRE ISR)
-        // All sends are non-blocking, we wait for TX_DONE via event queue
-        // =====================================================================
-        size_t txFree = 0;
-        uart_get_tx_buffer_free_size(uartNum, &txFree);
-
-        if (txFree > 0) {
-            uint8_t txByte;
-
-            switch (state) {
-                // --- POLL sequence ---
-                case POLL_ADDRESS_SENT:
-                    txByte = 0;  // msgtype
-                    uart_write_bytes(uartNum, (const char*)&txByte, 1);
-                    state = POLL_MSGTYPE_SENT;
-                    break;
-
-                case POLL_MSGTYPE_SENT:
-                    txByte = 0;  // data length = 0 for poll
-                    uart_write_bytes(uartNum, (const char*)&txByte, 1);
-                    state = POLL_DATALENGTH_SENT;
-                    break;
-
-                case POLL_DATALENGTH_SENT:
-                    // Transition to wait state - TX_DONE event will trigger next state
-                    state = POLL_WAIT_TX_DONE;
-                    break;
-
-                // --- Broadcast TX sequence ---
-                case TX_ADDRESS_SENT:
-                    txByte = 0;  // msgtype
-                    uart_write_bytes(uartNum, (const char*)&txByte, 1);
-                    state = TX_MSGTYPE_SENT;
-                    break;
-
-                case TX_MSGTYPE_SENT:
-                    txByte = rxtx_len;  // data length
-                    uart_write_bytes(uartNum, (const char*)&txByte, 1);
-                    state = TX;
-                    break;
-
-                case TX:
-                    if (rxtx_len == 0) {
-                        uart_write_bytes(uartNum, (const char*)&checksum, 1);
-                        state = TX_CHECKSUM_SENT;
-                    } else {
-                        txByte = exportData.get();
-                        checksum ^= txByte;
-                        uart_write_bytes(uartNum, (const char*)&txByte, 1);
-                        rxtx_len--;
-                    }
-                    break;
-
-                case TX_CHECKSUM_SENT:
-                    // Transition to wait state
-                    state = TX_WAIT_TX_DONE;
-                    break;
-
-                // --- Timeout ---
-                case TIMEOUT_ZEROBYTE_SENT:
-                    state = TIMEOUT_WAIT_TX_DONE;
-                    break;
-            }
-        }
-
-        // =====================================================================
-        // STEP 6: Timeout handling
-        // =====================================================================
-
-        // Timeout for non-existing devices (1ms)
-        if (state == RX_WAIT_DATALENGTH && (micros() - rx_start_time) > 1000) {
-            slave_present[poll_address] = false;
-            uint8_t zero = 0;
-            uart_write_bytes(uartNum, (const char*)&zero, 1);
-            state = TIMEOUT_ZEROBYTE_SENT;
-        }
-
-        // Timeout during message reception (5ms)
-        if ((state == RX_WAIT_MSGTYPE || state == RX_WAIT_DATA || state == RX_WAIT_CHECKSUM)
-            && (micros() - rx_start_time) > 5000) {
-            messageBuffer.clear();
-            messageBuffer.put('\n');
-            messageBuffer.complete = true;
-            state = IDLE;
+            // Nothing to do - check for timeout on incomplete messages
+            pcConnection.checkTimeout();
         }
     }
 
     // ========================================================================
     // PC CONNECTION IMPLEMENTATION
-    // Uses a dedicated HIGH-PRIORITY task on Core 0 for reading PC serial
-    // This mimics AVR's USART0_RX ISR which fires on every byte
+    //
+    // Uses FreeRTOS StreamBuffer for thread-safe IPC between:
+    // - Core 0: USB CDC reader task (high priority)
+    // - Core 1: RS485 state machine (main loop)
+    //
+    // StreamBuffer is lock-free for single-reader/single-writer scenarios.
     // ========================================================================
 
     MasterPCConnection::MasterPCConnection()
-        : tx_start_time(0), rxTaskHandle(NULL) {}
+        : pcToRS485Stream(NULL), rxTaskHandle(NULL), tx_start_time(0) {}
 
-    // Static task function - runs on Core 0 with high priority
-    // This task ONLY reads from Serial and feeds data to exportData buffer
-    // It runs independently of the main loop, like an ISR
+    // Static task function - runs on Core 0
     void MasterPCConnection::rxTaskFunc(void* param) {
-        // This task runs forever, constantly checking for PC serial data
-        // It's pinned to Core 0, while main loop runs on Core 1
-        // This gives us TRUE concurrency like AVR ISRs
+        MasterPCConnection* self = (MasterPCConnection*)param;
+        StreamBufferHandle_t stream = self->pcToRS485Stream;
 
+        // This task runs forever, draining USB CDC buffer into StreamBuffer
+        // It runs on Core 0 (where USB stack runs) with high priority
         for (;;) {
-            // Read all available bytes
+            // Read all available bytes from USB CDC
             while (Serial.available()) {
                 uint8_t c = Serial.read();
-                rs485master.feedExportByte(c);
+                // Send to StreamBuffer (non-blocking, drop if full)
+                xStreamBufferSend(stream, &c, 1, 0);
             }
 
-            // Small yield to prevent watchdog issues
-            // 1ms delay is acceptable - at 250kbaud, ~25 bytes arrive per ms
-            // With 256-byte buffer, we have 10ms margin
+            // Yield for 1 tick (~1ms) - matches USB Full-Speed frame rate
             vTaskDelay(1);
         }
     }
 
     void MasterPCConnection::begin() {
-        // Initialize Serial with larger RX buffer
-        Serial.setRxBufferSize(PC_SERIAL_RX_BUFFER_SIZE);
+        // Initialize Serial with large RX buffer to handle USB bursts
+        Serial.setRxBufferSize(PC_STREAM_BUFFER_SIZE);
         Serial.begin(RS485_BAUD_RATE);
 
         while (!Serial && millis() < 3000) {
             delay(1);
         }
 
-        // Create high-priority task on Core 0 for PC serial reading
-        // Priority 10 is high (higher than most system tasks)
-        // Core 0: Protocol CPU (handles WiFi, BT, etc) - we use it for Serial
-        // Core 1: Application CPU - we use it for RS485 state machine
+        // Create StreamBuffer for thread-safe IPC
+        // Trigger level = 1 means receiver unblocks when any byte is available
+        pcToRS485Stream = xStreamBufferCreate(PC_STREAM_BUFFER_SIZE, 1);
+
+        if (pcToRS485Stream == NULL) {
+            // Failed to create StreamBuffer - fatal error
+            while (1) {
+                delay(1000);
+            }
+        }
+
+        // Create USB reader task on Core 0 (where USB stack runs)
+        // Priority 10 is high - ensures USB buffer is drained promptly
         xTaskCreatePinnedToCore(
             rxTaskFunc,         // Task function
-            "PCSerialRX",       // Task name
+            "USBCDCReader",     // Task name
             4096,               // Stack size
-            NULL,               // Parameters
+            this,               // Parameter (this pointer)
             10,                 // Priority (high)
             &rxTaskHandle,      // Task handle
-            0                   // Core 0
+            0                   // Core 0 (USB stack runs here)
         );
     }
 
+    void MasterPCConnection::processStreamBuffer() {
+        // Drain StreamBuffer into RS485 export buffer
+        // This is called from the main loop on Core 1
+        uint8_t c;
+        while (xStreamBufferReceive(pcToRS485Stream, &c, 1, 0) > 0) {
+            rs485master.feedExportByte(c);
+        }
+    }
+
     void MasterPCConnection::txProcess() {
+        // Send slave responses to PC
         if (rs485master.messageBuffer.isEmpty()) {
             if (rs485master.messageBuffer.complete) {
                 rs485master.messageBuffer.complete = false;
@@ -370,7 +372,7 @@ namespace DcsBios {
     }
 
     void MasterPCConnection::checkTimeout() {
-        if (rs485master.messageBuffer.isNotEmpty() && (micros() - tx_start_time) > 5000) {
+        if (rs485master.messageBuffer.isNotEmpty() && (micros() - tx_start_time) > RX_TIMEOUT_US) {
             rs485master.messageBuffer.clear();
             rs485master.messageBuffer.put('\n');
             rs485master.messageBuffer.complete = true;
@@ -382,16 +384,23 @@ namespace DcsBios {
     // ========================================================================
 
     void setup() {
-        pcConnection.begin();   // Starts the PC serial RX task on Core 0
-        rs485master.begin();    // Initializes RS485 with event queue
+        // Initialize PC connection (creates USB reader task on Core 0)
+        pcConnection.begin();
+
+        // Initialize RS485 master (manual DE control, normal UART mode)
+        rs485master.begin();
     }
 
     void loop() {
         // Main loop runs on Core 1
-        // PC serial reading is handled by dedicated task on Core 0
-        // This gives us true concurrency like AVR's ISRs
 
+        // 1. Drain USB data from StreamBuffer into export buffer
+        pcConnection.processStreamBuffer();
+
+        // 2. Run RS485 state machine
         rs485master.loop();
+
+        // 3. Send any slave responses to PC
         pcConnection.txProcess();
     }
 

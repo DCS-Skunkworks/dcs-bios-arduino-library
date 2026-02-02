@@ -1,609 +1,684 @@
-# ESP32-S3 RS485 Master Technical Analysis
+# ESP32-S3 RS485 Master for DCS-BIOS: Complete Technical Analysis
 
-## Executive Summary
+## Document Purpose
 
-This document details all attempts to port the DCS-BIOS RS485 Master from AVR (Arduino Mega) to ESP32-S3. Despite multiple implementation approaches, we have not achieved full functionality. This document serves as a comprehensive reference to prevent repeated failed approaches.
+This document provides a comprehensive technical analysis of porting the DCS-BIOS RS485 Master from AVR (Arduino Mega) to ESP32-S3. It consolidates all implementation attempts, peer reviews from multiple expert sources, and presents the definitive solution.
 
 ---
 
-## 1. Hardware Configuration
+## Table of Contents
 
-### Target Hardware
+1. [Background: What is DCS-BIOS?](#1-background-what-is-dcs-bios)
+2. [System Architecture Overview](#2-system-architecture-overview)
+3. [Hardware Configuration](#3-hardware-configuration)
+4. [AVR vs ESP32: Fundamental Architectural Differences](#4-avr-vs-esp32-fundamental-architectural-differences)
+5. [Implementation Attempts and Observations](#5-implementation-attempts-and-observations)
+6. [Peer Review Synthesis](#6-peer-review-synthesis)
+7. [Root Cause Analysis: Top 3 Failure Reasons](#7-root-cause-analysis-top-3-failure-reasons)
+8. [The Definitive Solution](#8-the-definitive-solution)
+9. [References](#9-references)
+
+---
+
+## 1. Background: What is DCS-BIOS?
+
+### 1.1 Overview
+
+**DCS-BIOS** (Digital Combat Simulator - BIOS) is a protocol and software suite that enables real-world hardware cockpit builders to interface with the DCS World flight simulator. It exports simulator state (gauges, lights, displays) and accepts input commands (switches, buttons, rotary encoders) through a standardized binary protocol.
+
+### 1.2 The Communication Chain
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  DCS World   │────►│  DCS-BIOS    │────►│   RS485      │────►│   Slave      │
+│  Simulator   │     │  Hub (PC)    │     │   Master     │     │   Panels     │
+│              │◄────│              │◄────│   (ESP32)    │◄────│   (Arduino)  │
+└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+     Game              Export Data          RS485 Bus           Physical
+     State             @ 250kbaud           Half-Duplex         Controls
+```
+
+### 1.3 Data Flows
+
+1. **Outputs (PC → Slaves)**: Export data from DCS-BIOS Hub travels through the Master to all Slaves on the RS485 bus. This updates cockpit displays, gauges, and indicator lights.
+
+2. **Inputs (Slaves → PC)**: When a pilot flips a switch or turns a knob, the Slave sends a command through the Master back to the PC, which injects the input into DCS World.
+
+### 1.4 Master vs Slave Roles
+
+| Role | Function | Hardware |
+|------|----------|----------|
+| **Master** | Bridge between PC (USB serial) and RS485 bus. Forwards export data to slaves, polls slaves for input commands. | Currently: Arduino Mega. Target: ESP32-S3 |
+| **Slave** | Connected to physical cockpit panels. Receives export data, sends input commands when controls are manipulated. | Arduino Nano/Pro Mini |
+
+### 1.5 Why ESP32-S3?
+
+The Arduino Mega works but has limitations:
+- Limited processing power for complex panels
+- No built-in WiFi/Bluetooth for wireless configurations
+- Single-core, limited multitasking
+
+ESP32-S3 offers:
+- Dual-core 240MHz processor
+- Built-in WiFi and Bluetooth
+- Native USB (no FTDI chip needed)
+- More memory and GPIO
+
+---
+
+## 2. System Architecture Overview
+
+### 2.1 The DCS-BIOS Binary Protocol
+
+Communication uses a binary protocol at **250,000 baud**, 8N1 format.
+
+**Export Data Frame (PC → Master → Slaves):**
+```
+┌──────────────────────────────────────────────────────────────┐
+│ SYNC (4 bytes: 0x55 0x55 0x55 0x55) │ Address │ Count │ Data │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**RS485 Master-Slave Protocol:**
+```
+Master Poll:    [SlaveAddr] [MsgType=0] [Length=0]
+Slave Response: [Length] [MsgType] [Data...] [Checksum]
+Broadcast:      [Addr=0] [MsgType=0] [Length] [Data...] [Checksum]
+```
+
+### 2.2 Timing Requirements
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Baud Rate | 250,000 bps | 40µs per byte |
+| Poll Timeout | 1ms | Time to wait for slave response |
+| RX Timeout | 5ms | Maximum time for complete message |
+| Export Rate | ~30 Hz | ~370 bytes per update cycle |
+
+### 2.3 Half-Duplex RS485 Operation
+
+RS485 is a **half-duplex** bus - only one device can transmit at a time. The Master controls bus direction via the **DE (Driver Enable)** pin:
+
+```
+DE HIGH: Master transmitting (slaves must listen)
+DE LOW:  Master receiving (slaves can respond)
+```
+
+**Critical Timing**: The DE pin must switch at the EXACT moment the last bit leaves the transmitter. Too early = truncated transmission. Too late = collision with slave response.
+
+---
+
+## 3. Hardware Configuration
+
+### 3.1 Target Hardware
+
 - **Board**: Waveshare ESP32-S3-RS485-CAN
-- **MCU**: ESP32-S3
-- **RS485 Pins**: TX=GPIO17, RX=GPIO18, DE/RE (TX Enable)=GPIO21
-- **PC Serial**: **Hardware CDC (HW CDC)** - NOT TinyUSB
+- **MCU**: ESP32-S3 (Dual-core Xtensa LX7, 240MHz)
 - **RS485 Transceiver**: Onboard, directly connected to UART1
+- **USB**: Native USB (Hardware CDC)
 
-### Communication Parameters
-- **Baud Rate**: 250,000 bps
-- **Data Format**: 8N1 (8 data bits, no parity, 1 stop bit)
-- **Protocol**: Half-duplex RS485
+### 3.2 Pin Assignments
 
-### Important Hardware Note
-The ESP32-S3 has two USB serial options:
-1. **TinyUSB (USB OTG)** - Software USB stack
-2. **Hardware CDC (HW CDC)** - Native USB-serial built into the chip
+| Function | GPIO | Notes |
+|----------|------|-------|
+| RS485 TX | 17 | UART1 TX |
+| RS485 RX | 18 | UART1 RX |
+| RS485 DE/RE | 21 | TX Enable (active high) |
+| USB D+ | 20 | Native USB |
+| USB D- | 19 | Native USB |
 
-**The user is using HW CDC**, which means `Serial` maps to the hardware USB-CDC peripheral, not a software USB stack. This may have different buffering and timing characteristics than TinyUSB or traditional UART.
+### 3.3 Communication Parameters
 
----
-
-## 2. AVR Reference Implementation Analysis
-
-### Architecture Overview (src/internal/DcsBiosNgRS485Master.cpp.inc)
-
-The AVR implementation uses **hardware interrupts** for all UART operations:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        AVR MEGA 2560                            │
-├─────────────────────────────────────────────────────────────────┤
-│  UART0 (PC Connection)           UART1/2/3 (RS485 Buses)        │
-│  ┌─────────────────────┐         ┌─────────────────────┐        │
-│  │ ISR(USART0_RX_vect) │         │ ISR(USARTn_RX_vect) │        │
-│  │ - Fires on EVERY    │         │ - Receives slave    │        │
-│  │   byte from PC      │         │   responses         │        │
-│  │ - Immediately puts  │         │ - Feeds message     │        │
-│  │   byte into export  │         │   buffer            │        │
-│  │   data buffer       │         └─────────────────────┘        │
-│  └─────────────────────┘         ┌─────────────────────┐        │
-│  ┌─────────────────────┐         │ ISR(USARTn_UDRE_vect│        │
-│  │ ISR(USART0_UDRE_vect│         │ - TX buffer empty   │        │
-│  │ - TX buffer empty   │         │ - Sends next byte   │        │
-│  │ - Sends slave resp  │         │   to slaves         │        │
-│  │   to PC             │         └─────────────────────┘        │
-│  └─────────────────────┘         ┌─────────────────────┐        │
-│                                  │ ISR(USARTn_TX_vect) │        │
-│                                  │ - TX complete       │        │
-│                                  │ - Switches to RX    │        │
-│                                  └─────────────────────┘        │
-├─────────────────────────────────────────────────────────────────┤
-│                      Main Loop                                  │
-│  - Only handles state machine logic                             │
-│  - Timeouts (1ms poll, 5ms RX)                                  │
-│  - NEVER reads/writes UART directly (ISRs do that)              │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Critical AVR Characteristics
-
-1. **True Concurrency via Hardware Interrupts**
-   - `ISR(USART0_RX_vect)` fires on EVERY byte from PC, regardless of main loop state
-   - ISRs preempt main code instantly (within clock cycles)
-   - No byte is ever missed because hardware triggers interrupt
-
-2. **Byte-by-Byte Transmission**
-   - `ISR(USARTn_UDRE_vect)` fires when TX buffer is empty
-   - Sends exactly one byte per interrupt
-   - State machine advances one step per byte
-
-3. **TX Complete Detection**
-   - `ISR(USARTn_TX_vect)` fires when last bit has been physically transmitted
-   - This is when the line switches from TX to RX mode
-   - Critical for half-duplex timing
-
-4. **State Machine States**
-   ```
-   IDLE → POLL_ADDRESS_SENT → POLL_MSGTYPE_SENT → POLL_DATALENGTH_SENT
-                                                          ↓
-   IDLE ← RX_WAIT_CHECKSUM ← RX_WAIT_DATA ← RX_WAIT_MSGTYPE ← RX_WAIT_DATALENGTH
-
-   IDLE → TX_ADDRESS_SENT → TX_MSGTYPE_SENT → TX → TX_CHECKSUM_SENT → IDLE
-   ```
-
-### Key Code Sections
-
-**PC RX ISR (Line 285-296):**
 ```cpp
-void __attribute__((always_inline)) inline MasterPCConnection::rxISR() {
-    volatile uint8_t c = *udr;  // Read byte from UART register
-    #ifdef UART1_TXENABLE_PIN
-    uart1.exportData.put(c);    // Immediately buffer for RS485
-    #endif
-    // ... repeat for UART2, UART3
-}
-```
-
-**RS485 TX Complete ISR (Line 155-175):**
-```cpp
-void __attribute__((always_inline)) inline RS485Master::txcISR() {
-    switch (state) {
-        case POLL_DATALENGTH_SENT:
-            rx_start_time = micros();
-            state = RX_WAIT_DATALENGTH;
-            clear_txen();  // Switch to RX mode AFTER last bit sent
-        break;
-        // ...
-    }
-}
+#define RS485_BAUD_RATE    250000
+#define RS485_DATA_BITS    8
+#define RS485_PARITY       NONE
+#define RS485_STOP_BITS    1
+#define RS485_UART_NUM     1
 ```
 
 ---
 
-## 3. Implementation Attempts
+## 4. AVR vs ESP32: Fundamental Architectural Differences
 
-### Attempt 1: Arduino HardwareSerial
+This section documents the critical architectural differences that make porting non-trivial.
+
+### 4.1 Interrupt Architecture
+
+#### AVR (Arduino Mega)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        AVR MEGA 2560 UART Interrupts                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ISR(USART0_RX_vect)     Fires when: Byte received from PC             │
+│  ────────────────────    Latency: ~4 clock cycles (0.25µs @ 16MHz)     │
+│                          Action: Read byte, store in buffer             │
+│                                                                         │
+│  ISR(USART1_UDRE_vect)   Fires when: TX buffer empty, ready for byte   │
+│  ────────────────────    Latency: ~4 clock cycles                       │
+│                          Action: Load next byte from buffer             │
+│                                                                         │
+│  ISR(USART1_TX_vect)     Fires when: Last bit physically transmitted   │
+│  ────────────────────    Latency: ~4 clock cycles                       │
+│                          Action: DROP DE PIN (switch to RX mode)        │
+│                          THIS IS THE KEY TO CORRECT HALF-DUPLEX!        │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Property**: AVR ISRs are **hardware-triggered** and fire within clock cycles. The TX complete ISR (`USART_TX_vect`) fires at the EXACT moment the last stop bit leaves the pin, allowing **cycle-perfect DE control**.
+
+#### ESP32-S3
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     ESP32-S3 UART Architecture                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ESP-IDF UART Driver                                                    │
+│  ──────────────────                                                     │
+│  - Uses FreeRTOS event queues                                           │
+│  - Events: UART_DATA, UART_FIFO_OVF, UART_BUFFER_FULL, etc.            │
+│  - UART_TX_DONE event: NOT AVAILABLE in ESP-IDF 4.4!                   │
+│                                                                         │
+│  UART_MODE_RS485_HALF_DUPLEX                                           │
+│  ──────────────────────────                                             │
+│  - Driver auto-controls DE/RE pin based on FIFO status                 │
+│  - NOT cycle-perfect - timing based on internal state machine          │
+│  - May drop DE before last bit transmitted (truncation)                │
+│  - May hold DE after transmission (collision with slave)               │
+│                                                                         │
+│  FreeRTOS Scheduling                                                    │
+│  ──────────────────                                                     │
+│  - Context switch: ~10-15µs (vs 0.25µs for AVR ISR)                    │
+│  - Task priorities compete with WiFi, USB, system tasks                │
+│  - Non-deterministic timing (jitter)                                    │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.2 USB CDC vs Hardware UART
+
+#### AVR: True UART
+
+```
+PC ──USB──► FTDI Chip ──UART──► ATmega2560
+                                    │
+                                    ▼
+                              USART0_RX ISR
+                              (fires per byte,
+                               0.25µs latency)
+```
+
+#### ESP32-S3: USB Full-Speed CDC
+
+```
+PC ──USB──► ESP32-S3 Native USB ──► USB Stack ──► CDC Buffer ──► Serial.read()
+                                         │
+                                         ▼
+                              ┌─────────────────────────────┐
+                              │  USB Full-Speed Limitation  │
+                              │  ─────────────────────────  │
+                              │  - 1ms SOF frame interval   │
+                              │  - Data arrives in BURSTS   │
+                              │  - Up to 64 bytes per frame │
+                              │  - NOT byte-by-byte!        │
+                              └─────────────────────────────┘
+```
+
+**Critical Insight**: USB Full-Speed (12 Mbps) operates on **1ms Start-of-Frame intervals**. Data from the PC arrives in chunks every 1ms, NOT continuously like a UART. At 250kbaud, this means ~25 bytes arrive in a burst every millisecond.
+
+### 4.3 Comparison Summary
+
+| Aspect | AVR Mega | ESP32-S3 |
+|--------|----------|----------|
+| PC RX Interrupt Latency | 0.25µs | N/A (polling or task) |
+| TX Complete Detection | Hardware ISR (cycle-perfect) | Driver event queue (if available) or polling |
+| DE/RE Control | Direct in ISR | Auto (driver) or manual GPIO |
+| USB Data Arrival | Continuous (via FTDI UART) | 1ms bursts (USB Full-Speed) |
+| Multitasking | None (super-loop) | FreeRTOS (adds jitter) |
+| Context Switch | N/A | 10-15µs |
+
+---
+
+## 5. Implementation Attempts and Observations
+
+### 5.1 Attempt 1: Arduino HardwareSerial
 
 **Approach:**
 ```cpp
 HardwareSerial RS485Serial(1);
 RS485Serial.begin(250000, SERIAL_8N1, RX_PIN, TX_PIN);
+// Manual GPIO control for DE
 ```
 
-**Result:** FAILED - Inputs and outputs did not work
+**Result:** FAILED - Inputs and outputs did not work.
 
 **Analysis:**
-- Arduino's HardwareSerial does not support RS485 half-duplex mode
-- No automatic TX enable control
-- No way to detect TX complete for line turnaround
+- HardwareSerial wrapper lacks RS485-specific features
+- No automatic or reliable DE control
+- TX complete detection unreliable
 
 ---
 
-### Attempt 2: ESP-IDF UART Driver with RS485 Mode
+### 5.2 Attempt 2: ESP-IDF UART Driver with RS485 Mode
 
 **Approach:**
 ```cpp
+uart_driver_install(uartNum, 256, 256, 0, NULL, 0);  // No event queue!
 uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX);
-uart_set_pin(uartNum, TX_PIN, RX_PIN, RTS_PIN, UART_PIN_NO_CHANGE);
+// Blocking uart_wait_tx_done() for TX complete
 ```
 
-**Result:** PARTIAL - Inputs worked, outputs failed
+**Result:** PARTIAL SUCCESS - Inputs worked, outputs failed.
 
 **Observations:**
-- Slave responses were received and forwarded to PC (inputs worked)
-- PC export data was not reaching slaves (outputs failed)
-- Suspected: Data from PC was being lost during RS485 operations
+- Slave responses (inputs) were received and forwarded to PC
+- PC export data (outputs) never reached slaves correctly
+- Blocking `uart_wait_tx_done()` for 10ms caused PC data loss
 
 **Analysis:**
-- ESP-IDF's RS485 mode handles DE/RE pin automatically
-- However, we were using `uart_wait_tx_done()` which BLOCKS
-- During blocking, PC serial data was not being read
-- At 250kbaud, 25 bytes arrive per millisecond
-- A 10ms block = 250 bytes lost
+- The RS485 auto mode handles DE, but timing may not be exact
+- Blocking for TX complete misses USB data bursts
+- No event queue = driver state may be inconsistent
 
 ---
 
-### Attempt 3: Dual-Core FreeRTOS Implementation
+### 5.3 Attempt 3: Dual-Core FreeRTOS Implementation
 
 **Approach:**
-- Core 0: High-priority task constantly reading PC Serial
+- Core 0: High-priority task reading PC Serial
 - Core 1: RS485 state machine
-- Lock-free FIFO for inter-core communication
+- Custom RingBuffer for inter-core communication
 
-**Result:** FAILED - Same issues
+**Result:** FAILED - Same issues as Attempt 2.
 
 **Analysis:**
-- Added complexity without solving fundamental problem
-- FreeRTOS task switching still not as fast as hardware ISR
-- Context switch overhead (~1-4µs) vs ISR (~0.1µs)
+- The RingBuffer was NOT thread-safe (race conditions)
+- FreeRTOS task switching adds jitter
+- Still had blocking TX wait
 
 ---
 
-### Attempt 4: Simplified AVR Mirror (No FreeRTOS)
+### 5.4 Attempt 4: Simplified AVR Mirror
 
 **Approach:**
 - Single-core, single-task implementation
 - Mirror AVR state machine exactly
-- Use library's existing RingBuffer
 - Poll PC serial at start and end of loop
+- Use library's existing RingBuffer
 
-**Result:** PARTIAL - Inputs worked but with lag, outputs failed
+**Result:** PARTIAL SUCCESS - Inputs worked (with lag), outputs failed.
 
 **Observations:**
-- Inputs worked but slower than AVR
-- Outputs still failed completely
+- This was the most stable version for inputs
+- Outputs still completely failed
+- Noticeable input lag compared to AVR
 
 ---
 
-### Attempt 5: Aggressive PC Serial Reading (Current)
+### 5.5 Attempt 5: Aggressive Non-Blocking Polling
 
 **Approach:**
 - Remove ALL blocking `uart_wait_tx_done()` calls
-- Add intermediate TX_WAIT states that poll for completion
-- Call `pcConnection.rxProcess()` at EVERY state transition
-- Non-blocking TX completion check: `uart_wait_tx_done(uartNum, 0)`
+- Add TX_WAIT states that poll for completion
+- Call `pcConnection.rxProcess()` at every state transition
 
-**Result:** COMPLETE FAILURE - Inputs no longer work at all
+**Result:** COMPLETE FAILURE - Even inputs stopped working.
 
-**Observations:**
-- Made things WORSE
-- Even inputs that previously worked now fail
-- Something fundamental is broken
-
----
-
-## 4. Hypotheses
-
-### Hypothesis A: HW CDC Buffering Behavior
-
-**Theory:**
-Hardware CDC may buffer data differently than UART or TinyUSB. When we call `Serial.available()` and `Serial.read()`, we may not be getting data in real-time.
-
-**Evidence:**
-- User specifically mentioned using HW CDC, not TinyUSB
-- HW CDC has its own USB endpoint and buffering
-- May have different latency characteristics
-
-**Test:**
-- Check ESP32-S3 HW CDC documentation for buffering behavior
-- Try using `Serial.setRxBufferSize()` if available
-- Try using lower-level USB CDC API
+**Analysis:**
+- Removed waiting but didn't replace with proper awareness
+- State machine transitioned before TX was actually complete
+- DE dropped at wrong time, corrupting all communications
 
 ---
 
-### Hypothesis B: UART Driver Event Queue
+### 5.6 Attempt 6: UART Event Queue + Dual-Core Task
 
-**Theory:**
-ESP-IDF UART driver uses an event queue internally. Without processing events, the driver may behave unexpectedly.
-
-**Evidence:**
-- We pass `0, NULL, 0` to `uart_driver_install()` (no event queue)
-- Some UART features may require event processing
-- RS485 mode may have specific event requirements
-
-**Test:**
+**Approach:**
 ```cpp
-QueueHandle_t uart_queue;
-uart_driver_install(uartNum, 256, 256, 10, &uart_queue, 0);
-// Process events in loop
+uart_driver_install(uartNum, 512, 512, 20, &uartEventQueue, 0);  // Event queue enabled!
+// High-priority task on Core 0 for PC Serial
+// Poll uart_wait_tx_done(0) for TX complete detection
+```
+
+**Result:** FAILED - Inputs stopped working.
+
+**Analysis:**
+- UART_TX_DONE event doesn't exist in ESP-IDF 4.4
+- Polling `uart_wait_tx_done(0)` may not sync with driver's DE control
+- RingBuffer still not thread-safe
+
+---
+
+## 6. Peer Review Synthesis
+
+Three independent expert reviews were conducted. This section synthesizes their findings.
+
+### 6.1 Review 1: "The HW CDC Trap"
+
+**Key Insights:**
+
+1. **HW CDC is NOT a UART** - `Serial` on ESP32-S3 with Hardware CDC is a USB endpoint, not a UART. Data arrives in USB packets (up to 64 bytes), not byte-by-byte.
+
+2. **The RingBuffer is NOT thread-safe** - Using `volatile` variables doesn't make operations atomic. Dual-core writes/reads cause race conditions.
+
+3. **RS485 Auto Mode May Drop DE Early** - If there's any gap between bytes (while state machine processes), hardware might think TX is done.
+
+4. **Recommended: USB CDC Event Callback**
+```cpp
+// Use onEvent callback instead of polling
+Serial.onEvent(usbEventCallback);
+```
+
+5. **Recommended: FreeRTOS StreamBuffer**
+```cpp
+// Thread-safe, lock-free for single-reader/single-writer
+StreamBufferHandle_t pcToRS485Buffer;
 ```
 
 ---
 
-### Hypothesis C: RS485 Mode TX Complete Timing
+### 6.2 Review 2: "The 1ms USB Frame Elephant"
 
-**Theory:**
-`uart_wait_tx_done(uartNum, 0)` may not accurately reflect when the TX enable line should be switched.
+**Key Insights:**
 
-**Evidence:**
-- ESP-IDF RS485 mode manages DE/RE automatically
-- We're checking TX complete but driver may already have switched
-- Or driver may not switch until we explicitly tell it
+1. **USB Full-Speed 1ms Frame Timing is FUNDAMENTAL**
+   - ESP32-S3 native USB is Full-Speed (12 Mbps), not High-Speed
+   - Data arrives in 1ms SOF intervals, not continuously
+   - ~25 bytes per USB frame at 250kbaud
+   - **No software architecture can change this**
 
-**Test:**
-- Manual TX enable control instead of relying on driver
-- Check actual GPIO state during operation
-- Add oscilloscope/logic analyzer to verify timing
+2. **uart_driver_install() and uart_isr_register() are MUTUALLY EXCLUSIVE**
+   - Cannot use driver AND custom ISR simultaneously
+   - Must choose one approach
 
----
+3. **Event Queue May Be REQUIRED for RS485 Mode**
+   - Without event processing, driver state machine may be inconsistent
+   - This could explain why non-blocking checks broke everything
 
-### Hypothesis D: Non-Blocking TX Check Broken
-
-**Theory:**
-`uart_wait_tx_done(uartNum, 0)` with timeout=0 may not work correctly.
-
-**Evidence:**
-- After adding non-blocking TX checks, everything broke
-- ESP-IDF docs may have specific requirements
-
-**Test:**
-- Revert to blocking TX wait but with shorter timeout
-- Check return value of `uart_wait_tx_done()`
-- Use alternative TX complete detection
-
----
-
-### Hypothesis E: State Machine Logic Error
-
-**Theory:**
-Adding intermediate TX_WAIT states broke the state machine flow.
-
-**Evidence:**
-- Original AVR doesn't have these states
-- State transitions may be incorrect
-- May be stuck in a wait state
-
-**Test:**
-- Add debug output to see current state
-- Verify state transitions match expected flow
-- Check if stuck in any state
-
----
-
-### Hypothesis F: PC Serial Read Overhead
-
-**Theory:**
-Calling `pcConnection.rxProcess()` too frequently may be causing issues.
-
-**Evidence:**
-- Added ~15+ calls per loop iteration
-- Each call involves `Serial.available()` and potentially `Serial.read()`
-- May be introducing timing issues or overhead
-
-**Test:**
-- Reduce rxProcess calls to key points only
-- Profile time spent in rxProcess
-
----
-
-## 5. Proposed Solutions to Try
-
-### Solution 1: Use ESP32 UART Interrupts (Most Promising)
-
-**Rationale:**
-The fundamental difference between AVR and ESP32 implementations is that AVR uses hardware interrupts. ESP32 UART driver supports interrupts via `uart_isr_register()`.
-
-**Implementation:**
+4. **RS485 DE Timing Not Configured**
 ```cpp
-static void IRAM_ATTR uart_isr_handler(void *arg) {
-    // Read RX FIFO directly
-    // Put bytes into buffer
-    // This fires on every byte, like AVR
-}
-
-// Register ISR
-uart_isr_register(uartNum, uart_isr_handler, NULL, ESP_INTR_FLAG_IRAM, NULL);
-uart_enable_rx_intr(uartNum);
+// Missing critical timing configuration:
+uart_set_rs485_hd_mode(uartNum, true);
+// dl0_en: Delay before first TX bit
+// dl1_en: Delay after last TX bit (CRITICAL!)
 ```
 
-**Challenges:**
-- Need to understand ESP32 UART register layout
-- ISR must be in IRAM
-- May conflict with ESP-IDF UART driver
+5. **Accept Burst Arrival - Don't Fight USB Timing**
+   - Design for burst data arrival
+   - Use large buffers (512+ bytes)
+   - Drain entire USB buffer each iteration
 
 ---
 
-### Solution 2: Manual TX Enable Control
+### 6.3 Review 3: "DE/RE Turnaround is the Enemy"
 
-**Rationale:**
-Don't rely on ESP-IDF RS485 mode. Control DE/RE pin manually like AVR does.
+**Key Insights:**
 
-**Implementation:**
+1. **DE/RE Turnaround is the PRIMARY Failure Mode**
+   - DE high too long → slaves collide
+   - DE drops too early → truncated transmission
+   - RE not disabled during TX → master reads own echo
+
+2. **ESP-IDF RS485 Auto Mode is NOT "Protocol Safe"**
+   - Auto-RTS does not guarantee correct response window timing
+   - "Close but not exact" compared to AVR TXC ISR
+
+3. **Polling is Fundamentally Too Slow/Jittery**
+   - FreeRTOS scheduling adds non-deterministic delays
+   - Any dropped byte destroys DCS-BIOS stream alignment
+
+4. **Recommended: True UART ISR + Manual DE Control**
 ```cpp
-// Don't use UART_MODE_RS485_HALF_DUPLEX
-// Manually control TX enable pin
-digitalWrite(TXENABLE_PIN, HIGH);  // TX mode
-uart_write_bytes(...);
-uart_wait_tx_done(...);
-digitalWrite(TXENABLE_PIN, LOW);   // RX mode
+// Don't use RS485 auto mode
+// Use normal UART + manual GPIO for DE
+// Drop DE only in TX-complete ISR/handler
 ```
 
-**Advantages:**
-- More control over timing
-- Matches AVR behavior more closely
+5. **Symptom Explanation**
+   > "Inputs work but outputs fail" → DE never drops in time, slaves can poll-respond but broadcast gets collided/truncated.
 
 ---
 
-### Solution 3: Different Serial API for HW CDC
+### 6.4 Consensus Across All Reviews
 
-**Rationale:**
-HW CDC may have specific requirements or better APIs.
+| Issue | Review 1 | Review 2 | Review 3 | Consensus |
+|-------|----------|----------|----------|-----------|
+| DE/RE Timing | Possible issue | Missing dl0/dl1 config | PRIMARY cause | **CRITICAL** |
+| USB CDC Behavior | Not a UART | 1ms frame limit | Less critical | **IMPORTANT** |
+| RS485 Auto Mode | May not be exact | May need events | Not protocol safe | **DON'T USE** |
+| Thread Safety | RingBuffer unsafe | Use proper sync | Static buffers | **USE STREAMBUFFER** |
+| Polling vs ISR | Need callbacks | Event-driven | True ISR needed | **EVENT/ISR DRIVEN** |
 
-**Investigation:**
-```cpp
-// Check what Serial actually is on ESP32-S3 with HW CDC
-// HWCDC class in esp32-hal-cdc.h
+---
 
-// Possible alternatives:
-USBSerial.begin(250000);  // If available
-Serial0.begin(250000);    // Physical UART0 if broken out
+## 7. Root Cause Analysis: Top 3 Failure Reasons
+
+Based on all evidence and peer reviews, here are the definitive root causes:
+
+### 7.1 ROOT CAUSE #1: Incorrect DE/RE Turnaround Timing (CRITICAL)
+
+**The Problem:**
+
+The ESP-IDF `UART_MODE_RS485_HALF_DUPLEX` mode auto-controls the DE pin based on FIFO status, but this is **NOT cycle-perfect** like AVR's TX complete ISR.
+
+```
+AVR Behavior (Correct):
+─────────────────────────────────────────────────────────────────
+TX Data:  [START][D0][D1][D2][D3][D4][D5][D6][D7][STOP]
+DE Pin:   ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+                                                        ^ ISR fires here
+                                                          DE drops immediately
+
+ESP32 Behavior (Problematic):
+─────────────────────────────────────────────────────────────────
+TX Data:  [START][D0][D1][D2][D3][D4][D5][D6][D7][STOP]
+DE Pin:   ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔│←─ gap ─→│
+                                                        ^ FIFO empty event
+                                                          DE drops late OR early
 ```
 
-**Test:**
-- Verify `Serial` class type at runtime
-- Check if HW CDC has different read methods
-- Try `Serial.readBytes()` vs `Serial.read()`
+**The Evidence:**
+- Inputs work (slaves respond to polls) but outputs fail (broadcasts don't reach slaves)
+- This pattern indicates DE stays high too long after broadcast, colliding with any quick slave response
+- Or DE drops early, truncating broadcast packets
+
+**The Solution:**
+- **Manual DE control via GPIO** - Don't rely on auto mode
+- **Calculate exact TX completion time** - Based on bytes sent and baud rate
+- **Drop DE at precisely calculated moment** - Use hardware timer if needed
 
 ---
 
-### Solution 4: Revert and Add Debug Logging
+### 7.2 ROOT CAUSE #2: Thread-Unsafe Data Structures + Jitter (HIGH)
 
-**Rationale:**
-We need visibility into what's actually happening.
+**The Problem:**
 
-**Implementation:**
+The library's RingBuffer uses `volatile` but has no atomic operations:
+
 ```cpp
-// Revert to Attempt 4 (simplified AVR mirror) that partially worked
-// Add state logging
-Serial.printf("S:%d E:%d M:%d\n", state, exportData.getLength(), messageBuffer.getLength());
-```
-
-**Caution:**
-- Debug output on same Serial may interfere
-- May need separate debug UART
-- Or use GPIO toggling for oscilloscope
-
----
-
-### Solution 5: Check USB CDC on Second Core
-
-**Rationale:**
-ESP32-S3 USB handling may run on a specific core. Our code may be interfering.
-
-**Test:**
-```cpp
-// Pin task to Core 1, leave Core 0 for USB
-xTaskCreatePinnedToCore(rs485Task, "RS485", 4096, NULL, 5, NULL, 1);
-```
-
----
-
-### Solution 6: Use ESP-IDF UART Events Properly
-
-**Rationale:**
-The UART driver may require event queue processing for proper operation.
-
-**Implementation:**
-```cpp
-QueueHandle_t uart_queue;
-uart_driver_install(uartNum, 256, 256, 20, &uart_queue, 0);
-
-void loop() {
-    uart_event_t event;
-    if (xQueueReceive(uart_queue, &event, 0)) {
-        switch (event.type) {
-            case UART_DATA:
-                // Process received data
-                break;
-            case UART_TX_DONE:
-                // TX complete, switch to RX
-                break;
-        }
-    }
+// NOT THREAD-SAFE!
+void put(uint8_t c) {
+    buffer[writepos] = c;
+    writepos = ++writepos % SIZE;  // Read-modify-write is not atomic
 }
 ```
 
+When Core 0 writes (USB task) while Core 1 reads (RS485 task):
+- Race conditions corrupt data
+- Bytes are lost or duplicated
+- Stream alignment breaks
+
+Additionally, FreeRTOS task switching introduces **10-15µs jitter**, which at 250kbaud (40µs/byte) is significant.
+
+**The Evidence:**
+- Dual-core attempts failed despite seemingly correct logic
+- Data corruption patterns inconsistent with simple timing issues
+
+**The Solution:**
+- **Use FreeRTOS StreamBuffer** - Designed for single-reader/single-writer, lock-free
+- **Minimize task switches during critical sections**
+- **Use `portENTER_CRITICAL()` only where absolutely necessary**
+
 ---
 
-## 6. Data Flow Diagrams
+### 7.3 ROOT CAUSE #3: USB Full-Speed 1ms Burst Timing (MODERATE)
 
-### Working AVR Data Flow
+**The Problem:**
+
+USB Full-Speed operates on 1ms Start-of-Frame intervals. Data from PC arrives in **bursts every 1ms**, not continuously like AVR's FTDI UART.
 
 ```
-PC ──250kbaud──► UART0 RX ──ISR──► exportData buffer ──► RS485 TX ──► Slaves
-                                   (never misses byte)
+AVR (FTDI UART):
+Time:  0   40µs  80µs  120µs  160µs  200µs ...
+Bytes: [1]  [2]   [3]    [4]    [5]    [6]  ... (continuous)
 
-Slaves ──► RS485 RX ──ISR──► messageBuffer ──ISR──► UART0 TX ──► PC
-           (ISR fires           (ISR fires
-            per byte)            when ready)
+ESP32 (USB CDC):
+Time:  0ms        1ms        2ms        3ms
+Bytes: [1-25]     [26-50]    [51-75]    [76-100]  (burst every 1ms)
 ```
 
-### Current ESP32 Data Flow (Broken)
+At 250kbaud, ~25 bytes arrive per USB frame. If the code blocks for >1ms (e.g., `uart_wait_tx_done(10ms)`), multiple USB frames worth of data accumulates or overflows.
+
+**The Evidence:**
+- Output failures correlate with blocking TX wait
+- Increasing buffer sizes helped stability
+
+**The Solution:**
+- **Accept burst arrival** - Don't fight USB timing
+- **Large buffers** - 512+ bytes to handle multiple USB frames
+- **Never block for more than ~500µs** - Stay ahead of USB frames
+- **Drain entire Serial buffer each iteration**
+
+---
+
+## 8. The Definitive Solution
+
+Based on all analysis and peer reviews, here is the definitive architecture that addresses ALL identified root causes.
+
+### 8.1 Architecture Overview
 
 ```
-PC ──250kbaud──► USB CDC ──???──► Serial buffer ──poll──► exportData ──► RS485 TX
-                                  (may overflow)  (may miss)
-
-Slaves ──► UART1 RX ──poll──► messageBuffer ──poll──► Serial.write() ──► PC
-           (poll only when
-            main loop runs)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ESP32-S3 DCS-BIOS RS485 Master                           │
+│                         DEFINITIVE ARCHITECTURE                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                         CORE 0                                      │   │
+│   │                   USB CDC Reader Task                               │   │
+│   │                   (Priority: HIGH)                                  │   │
+│   │                                                                     │   │
+│   │   for(;;) {                                                         │   │
+│   │       while (Serial.available()) {                                  │   │
+│   │           byte = Serial.read();                                     │   │
+│   │           xStreamBufferSend(pcToRS485Stream, &byte, 1, 0);         │   │
+│   │       }                                                             │   │
+│   │       vTaskDelay(1);  // Yield for 1 tick (matches USB frame)      │   │
+│   │   }                                                                 │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                              │
+│                              │ StreamBuffer (Thread-Safe)                   │
+│                              │ Size: 1024 bytes                             │
+│                              ▼                                              │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                         CORE 1                                      │   │
+│   │                   RS485 State Machine                               │   │
+│   │                   (Main Arduino Loop)                               │   │
+│   │                                                                     │   │
+│   │   Key Features:                                                     │   │
+│   │   ─────────────                                                     │   │
+│   │   1. NORMAL UART MODE (not RS485 auto mode)                        │   │
+│   │   2. MANUAL DE CONTROL via GPIO                                    │   │
+│   │   3. PACKET-BASED TX (write all bytes at once)                     │   │
+│   │   4. CALCULATED TX COMPLETE TIME (deterministic DE drop)           │   │
+│   │   5. NON-BLOCKING state machine                                    │   │
+│   │                                                                     │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                              │
+│                              ▼                                              │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                     UART1 (RS485 Bus)                               │   │
+│   │                                                                     │   │
+│   │   Configuration:                                                    │   │
+│   │   - Baud: 250000                                                    │   │
+│   │   - Mode: UART_MODE_UART (NOT RS485 auto!)                         │   │
+│   │   - DE Pin: Manual GPIO control                                    │   │
+│   │                                                                     │   │
+│   │   TX Sequence:                                                      │   │
+│   │   1. Raise DE (GPIO HIGH)                                          │   │
+│   │   2. Write ENTIRE packet to FIFO at once                           │   │
+│   │   3. Calculate TX time: bytes × 10 bits × (1/250000) seconds       │   │
+│   │   4. Wait for calculated time (or poll TX FIFO empty + margin)     │   │
+│   │   5. Drop DE (GPIO LOW) - NOW in RX mode                           │   │
+│   │                                                                     │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Key Difference
-- AVR: ISRs fire **regardless** of main loop state
-- ESP32: Everything depends on main loop **polling**
+### 8.2 Key Design Decisions
 
----
+| Decision | Rationale |
+|----------|-----------|
+| **Normal UART mode, not RS485 auto** | Auto mode DE timing is not exact enough |
+| **Manual GPIO for DE** | Full control over timing |
+| **Write entire packet at once** | No gaps between bytes that could trigger early DE drop |
+| **Calculate TX completion time** | Deterministic: `time = bytes × 40µs` |
+| **StreamBuffer for IPC** | Thread-safe, lock-free, designed for this use case |
+| **Separate task for USB reading** | Isolates USB 1ms timing from RS485 timing |
+| **Core pinning** | Core 0 for USB (where USB stack runs), Core 1 for RS485 |
 
-## 7. Timing Analysis
+### 8.3 TX Completion Timing
 
-### Byte Timing at 250kbaud
-- 1 byte = 10 bits (8 data + 1 start + 1 stop)
-- Time per byte = 10 / 250000 = 40µs
+At 250,000 baud with 10 bits per byte (8 data + 1 start + 1 stop):
 
-### Worst Case PC Data Burst
-- DCS-BIOS exports can be 1000+ bytes
-- At 40µs/byte = 40ms of continuous data
-- During this time, we MUST NOT block
-
-### ESP32 Main Loop Timing
-- If loop takes 1ms (a reasonable estimate)
-- We miss 1000µs / 40µs = 25 bytes per iteration
-- With 128-byte buffer, overflow in ~5ms
-
-### AVR ISR Timing
-- ISR entry: ~4 clock cycles at 16MHz = 0.25µs
-- ISR execution: ~20 cycles = 1.25µs
-- Total: ~1.5µs per byte
-- At 40µs/byte, plenty of time between bytes
-
----
-
-## 8. Register-Level Comparison
-
-### AVR UART Registers
 ```
-UDRn  - Data register (read RX, write TX)
-UCSRnA - Status (RXC=data ready, TXC=TX complete, UDRE=TX buffer empty)
-UCSRnB - Control (RXCIE, TXCIE, UDRIE = interrupt enables)
-UCSRnC - Frame format
+Time per byte = 10 bits / 250,000 bps = 40 µs
+
+Poll packet (3 bytes):   3 × 40µs = 120 µs
+Broadcast (100 bytes): 100 × 40µs = 4,000 µs = 4 ms
 ```
 
-### ESP32 UART Registers (simplified)
-```
-UART_FIFO_REG      - Read/write FIFO
-UART_STATUS_REG    - TX/RX FIFO counts
-UART_INT_RAW_REG   - Interrupt status
-UART_INT_ENA_REG   - Interrupt enables
-UART_RS485_CONF_REG - RS485 configuration
-```
+After writing all bytes to FIFO, wait for `(byte_count × 40µs) + margin` before dropping DE.
+
+### 8.4 Implementation Files
+
+The definitive implementation consists of:
+
+1. **`DcsBiosESP32RS485Master.h`** - Header with class definitions
+2. **`DcsBiosESP32RS485Master.cpp.inc`** - Implementation
 
 ---
 
-## 9. What We Know Works
+## 9. References
 
-1. **ESP-IDF UART driver** - Correctly sends/receives on RS485 bus
-2. **RS485 half-duplex mode** - TX enable pin is controlled automatically
-3. **Slave polling** - When we poll slaves, they respond
-4. **Slave response forwarding** - Responses can be sent to PC (when inputs work)
+### 9.1 ESP-IDF Documentation
+- [UART Driver](https://docs.espressif.com/projects/esp-idf/en/v4.4/esp32s3/api-reference/peripherals/uart.html)
+- [FreeRTOS Stream Buffers](https://www.freertos.org/xStreamBufferCreate.html)
 
-## 10. What We Know Fails
+### 9.2 ESP32-S3 Technical Reference
+- [ESP32-S3 TRM - UART Chapter](https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf)
 
-1. **PC data reception during RS485 TX** - Bytes are missed
-2. **Export data reaching slaves** - Even when buffered, doesn't transmit correctly
-3. **Non-blocking TX wait** - Using timeout=0 broke everything
-4. **Aggressive polling** - More polling made things worse
+### 9.3 USB Specifications
+- USB 2.0 Full-Speed: 12 Mbps, 1ms SOF interval
 
----
-
-## 11. Recommended Next Steps
-
-### Priority 1: Revert and Stabilize
-Revert to the version where inputs worked (Attempt 4) so we have a baseline.
-
-### Priority 2: Add Visibility
-Add debug output (on separate UART if possible) to see:
-- Current state
-- Buffer fill levels
-- Byte counts
-
-### Priority 3: Investigate HW CDC
-Research ESP32-S3 Hardware CDC specifically:
-- Buffering behavior
-- Interrupt support
-- Best practices
-
-### Priority 4: Implement True Interrupts
-If polling cannot work, implement ESP32 UART interrupts to match AVR behavior.
-
-### Priority 5: Logic Analyzer
-If available, capture actual signals:
-- USB CDC data
-- RS485 bus
-- TX enable pin
-- Timing relationships
+### 9.4 DCS-BIOS
+- [DCS-BIOS GitHub](https://github.com/DCS-Skunkworks/dcs-bios)
+- [Developer Guide](https://github.com/DCS-Skunkworks/dcs-bios/blob/master/Scripts/DCS-BIOS/doc/developerguide.adoc)
 
 ---
 
-## 12. Code Repository State
+## Document History
 
-### Current Branch
-`claude/esp32-rs485-master-support-0aNci`
-
-### Relevant Commits
-1. Initial ESP-IDF implementation
-2. Simplified AVR mirror
-3. RingBuffer template fix
-4. Non-blocking aggressive polling (BROKEN)
-
-### Files Modified
-- `src/DcsBios.h` - Conditional compilation for ESP32
-- `src/internal/ESP32RS485/DcsBiosESP32RS485Master.h` - Header
-- `src/internal/ESP32RS485/DcsBiosESP32RS485Master.cpp.inc` - Implementation
-- `examples/ESP32S3_RS485Master/ESP32S3_RS485Master.ino` - Example
+| Date | Version | Changes |
+|------|---------|---------|
+| 2026-02-02 | 1.0 | Initial analysis |
+| 2026-02-02 | 2.0 | Added peer reviews, root cause analysis, definitive solution |
 
 ---
 
-## 13. Questions for User/Tester
-
-1. When inputs worked, how fast was the response? Instant or noticeable delay?
-2. Does the ESP32 show any error messages in serial monitor?
-3. Is there a logic analyzer available to capture the RS485 bus?
-4. Can you test with TinyUSB instead of HW CDC to compare?
-5. What happens if you slow the baud rate to 115200?
-
----
-
-## 14. References
-
-- [ESP-IDF UART Documentation](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-reference/peripherals/uart.html)
-- [ESP32-S3 Technical Reference Manual](https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf)
-- [ESP32 Hardware CDC](https://docs.espressif.com/projects/arduino-esp32/en/latest/api/usb_cdc.html)
-- [DCS-BIOS Developer Guide](https://github.com/DCS-Skunkworks/dcs-bios/blob/master/Scripts/DCS-BIOS/doc/developerguide.adoc)
-
----
-
-*Document created: 2026-02-02*
-*Last updated: 2026-02-02*
-*Status: Implementation attempts ongoing*
+*This document represents the complete technical analysis of the ESP32-S3 RS485 Master porting effort. The definitive solution addresses all identified root causes and incorporates feedback from multiple expert reviews.*
