@@ -15,6 +15,8 @@
 #include <stdint.h>
 #include <driver/uart.h>
 
+#include "../RingBuffer.h"  // Use existing library RingBuffer
+
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
@@ -38,38 +40,7 @@
 #define RS485_BAUD_RATE 250000
 #define RS485_MAX_SLAVES 32
 
-// ============================================================================
-// RING BUFFER - Identical to AVR implementation
-// ============================================================================
-
 namespace DcsBios {
-
-    template<uint8_t SIZE>
-    class RingBuffer {
-        volatile uint8_t buffer[SIZE];
-        volatile uint8_t writepos;
-        volatile uint8_t readpos;
-    public:
-        volatile bool complete;
-
-        RingBuffer() : writepos(0), readpos(0), complete(false) {}
-
-        inline void put(uint8_t c) {
-            buffer[writepos] = c;
-            writepos = (writepos + 1) % SIZE;
-        }
-
-        inline uint8_t get() {
-            uint8_t ret = buffer[readpos];
-            readpos = (readpos + 1) % SIZE;
-            return ret;
-        }
-
-        inline bool isEmpty() { return readpos == writepos; }
-        inline bool isNotEmpty() { return readpos != writepos; }
-        inline uint8_t getLength() { return (writepos - readpos) % SIZE; }
-        inline void clear() { readpos = writepos = 0; }
-    };
 
     // ============================================================================
     // RS485 MASTER - Mimics AVR implementation exactly
@@ -87,22 +58,29 @@ namespace DcsBios {
         // Slave tracking
         volatile bool slave_present[128];
 
-        // State machine
+        // State machine - EXACTLY mirrors AVR states + wait states for non-blocking TX
         volatile uint8_t state;
         enum State {
             IDLE,
+            // Polling states
             POLL_ADDRESS_SENT,
             POLL_MSGTYPE_SENT,
             POLL_DATALENGTH_SENT,
-            TIMEOUT_ZEROBYTE_SENT,
+            POLL_WAIT_TX_COMPLETE,      // Wait for TX complete before switching to RX
+            // RX states
             RX_WAIT_DATALENGTH,
             RX_WAIT_MSGTYPE,
             RX_WAIT_DATA,
             RX_WAIT_CHECKSUM,
+            // Timeout state
+            TIMEOUT_ZEROBYTE_SENT,
+            TIMEOUT_WAIT_TX_COMPLETE,   // Wait for timeout byte TX complete
+            // Broadcast TX states
             TX_ADDRESS_SENT,
             TX_MSGTYPE_SENT,
             TX,
-            TX_CHECKSUM_SENT
+            TX_CHECKSUM_SENT,
+            TX_WAIT_COMPLETE            // Wait for broadcast TX complete
         };
 
     private:
@@ -118,6 +96,11 @@ namespace DcsBios {
         volatile uint32_t rx_start_time;
 
         void advancePollAddress();
+
+        // Inline helper to check if TX is complete (non-blocking)
+        inline bool isTxComplete() {
+            return uart_wait_tx_done(uartNum, 0) == ESP_OK;
+        }
 
     public:
         RS485Master();
@@ -143,7 +126,8 @@ namespace DcsBios {
         void begin();
 
         // Read from PC Serial, feed to RS485 master (mimics AVR rxISR behavior)
-        void rxProcess();
+        // Returns number of bytes read
+        int rxProcess();
 
         // Send slave responses to PC (mimics AVR udreISR behavior)
         void txProcess();
