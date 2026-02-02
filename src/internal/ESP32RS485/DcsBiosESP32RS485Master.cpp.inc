@@ -62,17 +62,10 @@ namespace DcsBios {
     }
 
     void RS485Master::processUartEvents() {
-        // Process all pending UART events (non-blocking)
-        // This is how we detect TX_DONE without blocking!
+        // Process UART events for error handling
         uart_event_t event;
         while (xQueueReceive(uartEventQueue, &event, 0) == pdTRUE) {
             switch (event.type) {
-                case UART_TX_DONE:
-                    txDoneFlag = true;
-                    break;
-                case UART_DATA:
-                    // Data available - handled in main loop
-                    break;
                 case UART_FIFO_OVF:
                 case UART_BUFFER_FULL:
                     // Overflow - flush and continue
@@ -81,6 +74,13 @@ namespace DcsBios {
                 default:
                     break;
             }
+        }
+
+        // Check TX completion by polling (non-blocking with timeout=0)
+        // uart_wait_tx_done with timeout 0 returns ESP_OK if TX is complete
+        // This is the ESP32 equivalent of checking the TXC flag on AVR
+        if (uart_wait_tx_done(uartNum, 0) == ESP_OK) {
+            txDoneFlag = true;
         }
     }
 
