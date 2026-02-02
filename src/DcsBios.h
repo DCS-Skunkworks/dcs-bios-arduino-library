@@ -41,8 +41,15 @@ Normally, those #defines would go in a separate "config.h" or you would use comp
 do not come with their own build system, we are just putting everything into the header file.
 */
 #ifdef DCSBIOS_RS485_MASTER
-	#include "internal/DcsBiosNgRS485Master.h"
-	#include "internal/DcsBiosNgRS485Master.cpp.inc"
+	#ifdef ARDUINO_ARCH_ESP32
+		// ESP32 RS485 Master implementation
+		#include "internal/ESP32RS485/DcsBiosESP32RS485Master.h"
+		#include "internal/ESP32RS485/DcsBiosESP32RS485Master.cpp.inc"
+	#else
+		// AVR (Arduino Mega) RS485 Master implementation
+		#include "internal/DcsBiosNgRS485Master.h"
+		#include "internal/DcsBiosNgRS485Master.cpp.inc"
+	#endif
 #endif
 #ifdef DCSBIOS_RS485_SLAVE
 	#if defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1280__)
