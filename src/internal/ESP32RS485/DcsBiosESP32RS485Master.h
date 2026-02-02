@@ -15,6 +15,8 @@
 #include <stdint.h>
 #include <driver/uart.h>
 
+#include "../RingBuffer.h"  // Use existing library RingBuffer
+
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
@@ -38,38 +40,7 @@
 #define RS485_BAUD_RATE 250000
 #define RS485_MAX_SLAVES 32
 
-// ============================================================================
-// RING BUFFER - Identical to AVR implementation
-// ============================================================================
-
 namespace DcsBios {
-
-    template<uint8_t SIZE>
-    class RingBuffer {
-        volatile uint8_t buffer[SIZE];
-        volatile uint8_t writepos;
-        volatile uint8_t readpos;
-    public:
-        volatile bool complete;
-
-        RingBuffer() : writepos(0), readpos(0), complete(false) {}
-
-        inline void put(uint8_t c) {
-            buffer[writepos] = c;
-            writepos = (writepos + 1) % SIZE;
-        }
-
-        inline uint8_t get() {
-            uint8_t ret = buffer[readpos];
-            readpos = (readpos + 1) % SIZE;
-            return ret;
-        }
-
-        inline bool isEmpty() { return readpos == writepos; }
-        inline bool isNotEmpty() { return readpos != writepos; }
-        inline uint8_t getLength() { return (writepos - readpos) % SIZE; }
-        inline void clear() { readpos = writepos = 0; }
-    };
 
     // ============================================================================
     // RS485 MASTER - Mimics AVR implementation exactly
