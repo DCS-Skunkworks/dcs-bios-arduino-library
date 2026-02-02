@@ -15,7 +15,7 @@
 #include <stdint.h>
 #include <driver/uart.h>
 
-#include "../RingBuffer.h"  // Use existing library RingBuffer
+#include "../RingBuffer.h"  // Use library's existing RingBuffer
 
 // ============================================================================
 // CONFIGURATION
@@ -58,29 +58,22 @@ namespace DcsBios {
         // Slave tracking
         volatile bool slave_present[128];
 
-        // State machine - EXACTLY mirrors AVR states + wait states for non-blocking TX
+        // State machine
         volatile uint8_t state;
         enum State {
             IDLE,
-            // Polling states
             POLL_ADDRESS_SENT,
             POLL_MSGTYPE_SENT,
             POLL_DATALENGTH_SENT,
-            POLL_WAIT_TX_COMPLETE,      // Wait for TX complete before switching to RX
-            // RX states
+            TIMEOUT_ZEROBYTE_SENT,
             RX_WAIT_DATALENGTH,
             RX_WAIT_MSGTYPE,
             RX_WAIT_DATA,
             RX_WAIT_CHECKSUM,
-            // Timeout state
-            TIMEOUT_ZEROBYTE_SENT,
-            TIMEOUT_WAIT_TX_COMPLETE,   // Wait for timeout byte TX complete
-            // Broadcast TX states
             TX_ADDRESS_SENT,
             TX_MSGTYPE_SENT,
             TX,
-            TX_CHECKSUM_SENT,
-            TX_WAIT_COMPLETE            // Wait for broadcast TX complete
+            TX_CHECKSUM_SENT
         };
 
     private:
@@ -96,11 +89,6 @@ namespace DcsBios {
         volatile uint32_t rx_start_time;
 
         void advancePollAddress();
-
-        // Inline helper to check if TX is complete (non-blocking)
-        inline bool isTxComplete() {
-            return uart_wait_tx_done(uartNum, 0) == ESP_OK;
-        }
 
     public:
         RS485Master();
@@ -126,8 +114,7 @@ namespace DcsBios {
         void begin();
 
         // Read from PC Serial, feed to RS485 master (mimics AVR rxISR behavior)
-        // Returns number of bytes read
-        int rxProcess();
+        void rxProcess();
 
         // Send slave responses to PC (mimics AVR udreISR behavior)
         void txProcess();

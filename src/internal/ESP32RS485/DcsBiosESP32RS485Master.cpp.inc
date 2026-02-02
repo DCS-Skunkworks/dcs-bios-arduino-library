@@ -11,7 +11,6 @@ namespace DcsBios {
 
     // ========================================================================
     // RS485 MASTER IMPLEMENTATION - Mirrors AVR exactly
-    // CRITICAL: No blocking calls! Must poll for TX completion.
     // ========================================================================
 
     RS485Master::RS485Master()
@@ -78,25 +77,15 @@ namespace DcsBios {
     }
 
     void RS485Master::loop() {
-        // =================================================================
-        // CRITICAL: Read PC serial BEFORE any state processing
-        // This mimics AVR ISR firing independently of main code
-        // =================================================================
-        pcConnection.rxProcess();
-
-        // =================================================================
-        // Handle RX states - check for incoming data from slaves
-        // =================================================================
+        // Read from RS485 bus if in RX state
         size_t available = 0;
         uart_get_buffered_data_len(uartNum, &available);
 
+        // Process RX data
         while (available > 0 && state >= RX_WAIT_DATALENGTH && state <= RX_WAIT_CHECKSUM) {
             uint8_t c;
             if (uart_read_bytes(uartNum, &c, 1, 0) != 1) break;
             available--;
-
-            // Read PC serial between every byte processed
-            pcConnection.rxProcess();
 
             switch (state) {
                 case RX_WAIT_DATALENGTH:
@@ -133,43 +122,8 @@ namespace DcsBios {
             }
         }
 
-        // Read PC serial after RX processing
-        pcConnection.rxProcess();
-
-        // =================================================================
-        // Handle TX wait states - NON-BLOCKING check for TX completion
-        // =================================================================
-        switch (state) {
-            case POLL_WAIT_TX_COMPLETE:
-                if (isTxComplete()) {
-                    uart_flush_input(uartNum);
-                    rx_start_time = micros();
-                    state = RX_WAIT_DATALENGTH;
-                }
-                pcConnection.rxProcess();
-                break;
-
-            case TIMEOUT_WAIT_TX_COMPLETE:
-                if (isTxComplete()) {
-                    state = IDLE;
-                }
-                pcConnection.rxProcess();
-                break;
-
-            case TX_WAIT_COMPLETE:
-                if (isTxComplete()) {
-                    state = IDLE;
-                }
-                pcConnection.rxProcess();
-                break;
-        }
-
-        // =================================================================
-        // IDLE state - start new operations
-        // =================================================================
+        // State machine - IDLE state handling
         if (state == IDLE) {
-            pcConnection.rxProcess();
-
             if (exportData.isNotEmpty()) {
                 // We have export data to send - start broadcast
                 rxtx_len = exportData.getLength();
@@ -193,13 +147,8 @@ namespace DcsBios {
             }
         }
 
-        // Read PC serial after IDLE processing
-        pcConnection.rxProcess();
-
-        // =================================================================
         // TX state machine - send bytes one at a time (like AVR UDRE ISR)
-        // NON-BLOCKING: only send when TX buffer has space
-        // =================================================================
+        // Check if UART TX is ready
         size_t txFree = 0;
         uart_get_tx_buffer_free_size(uartNum, &txFree);
 
@@ -207,44 +156,39 @@ namespace DcsBios {
             uint8_t txByte;
 
             switch (state) {
-                // --- POLL sequence ---
                 case POLL_ADDRESS_SENT:
                     txByte = 0;  // msgtype
                     uart_write_bytes(uartNum, (const char*)&txByte, 1);
                     state = POLL_MSGTYPE_SENT;
-                    pcConnection.rxProcess();
                     break;
 
                 case POLL_MSGTYPE_SENT:
                     txByte = 0;  // data length = 0 for poll
                     uart_write_bytes(uartNum, (const char*)&txByte, 1);
                     state = POLL_DATALENGTH_SENT;
-                    pcConnection.rxProcess();
                     break;
 
                 case POLL_DATALENGTH_SENT:
-                    // Move to wait state - NON-BLOCKING
-                    state = POLL_WAIT_TX_COMPLETE;
-                    pcConnection.rxProcess();
+                    // Wait for TX complete, then switch to RX
+                    uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+                    uart_flush_input(uartNum);
+                    rx_start_time = micros();
+                    state = RX_WAIT_DATALENGTH;
                     break;
 
-                // --- Broadcast TX sequence ---
                 case TX_ADDRESS_SENT:
                     txByte = 0;  // msgtype
                     uart_write_bytes(uartNum, (const char*)&txByte, 1);
                     state = TX_MSGTYPE_SENT;
-                    pcConnection.rxProcess();
                     break;
 
                 case TX_MSGTYPE_SENT:
                     txByte = rxtx_len;  // data length
                     uart_write_bytes(uartNum, (const char*)&txByte, 1);
                     state = TX;
-                    pcConnection.rxProcess();
                     break;
 
                 case TX:
-                    pcConnection.rxProcess();  // Read before potentially long operation
                     if (rxtx_len == 0) {
                         // Send checksum
                         uart_write_bytes(uartNum, (const char*)&checksum, 1);
@@ -256,39 +200,28 @@ namespace DcsBios {
                         uart_write_bytes(uartNum, (const char*)&txByte, 1);
                         rxtx_len--;
                     }
-                    pcConnection.rxProcess();
                     break;
 
                 case TX_CHECKSUM_SENT:
-                    // Move to wait state - NON-BLOCKING
-                    state = TX_WAIT_COMPLETE;
-                    pcConnection.rxProcess();
+                    // Wait for TX complete
+                    uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+                    state = IDLE;
                     break;
 
-                // --- Timeout byte ---
                 case TIMEOUT_ZEROBYTE_SENT:
-                    // Move to wait state - NON-BLOCKING
-                    state = TIMEOUT_WAIT_TX_COMPLETE;
-                    pcConnection.rxProcess();
+                    uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+                    state = IDLE;
                     break;
             }
         }
 
-        // Read PC serial after TX processing
-        pcConnection.rxProcess();
-
-        // =================================================================
-        // Timeout handling
-        // =================================================================
-
-        // Timeout for non-existing devices (1ms like AVR)
+        // Timeout handling for non-existing devices (1ms like AVR)
         if (state == RX_WAIT_DATALENGTH && (micros() - rx_start_time) > 1000) {
             slave_present[poll_address] = false;
             // Send zero byte on behalf of non-existing device
             uint8_t zero = 0;
             uart_write_bytes(uartNum, (const char*)&zero, 1);
             state = TIMEOUT_ZEROBYTE_SENT;
-            pcConnection.rxProcess();
         }
 
         // Timeout during message reception (5ms like AVR)
@@ -298,11 +231,7 @@ namespace DcsBios {
             messageBuffer.put('\n');
             messageBuffer.complete = true;
             state = IDLE;
-            pcConnection.rxProcess();
         }
-
-        // Final PC serial read
-        pcConnection.rxProcess();
     }
 
     // ========================================================================
@@ -318,16 +247,13 @@ namespace DcsBios {
         }
     }
 
-    int MasterPCConnection::rxProcess() {
+    void MasterPCConnection::rxProcess() {
         // Read ALL available bytes from PC and feed to RS485 master
         // This mimics the AVR USART0_RX ISR which fires on every byte
-        int count = 0;
         while (Serial.available()) {
             uint8_t c = Serial.read();
             rs485master.feedExportByte(c);
-            count++;
         }
-        return count;
     }
 
     void MasterPCConnection::txProcess() {
@@ -365,11 +291,18 @@ namespace DcsBios {
     }
 
     void loop() {
-        // RS485 loop handles PC serial reading internally at every opportunity
+        // CRITICAL: Read from PC Serial FIRST, every loop iteration
+        // This mimics the AVR behavior where USART0_RX ISR fires on every byte
+        pcConnection.rxProcess();
+
+        // Run RS485 state machine
         rs485master.loop();
 
         // Send any slave responses to PC
         pcConnection.txProcess();
+
+        // Read again to minimize latency
+        pcConnection.rxProcess();
     }
 
 }  // namespace DcsBios
