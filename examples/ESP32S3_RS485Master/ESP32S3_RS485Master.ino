@@ -1,14 +1,44 @@
 /*
+  =============================================================================
   ESP32-S3 RS-485 Master for DCS-BIOS
+  =============================================================================
 
-  This example is configured for boards like the Waveshare ESP32-S3-RS485-CAN:
-  https://www.waveshare.com/esp32-s3-rs485-can.htm
+  This implementation leverages the ESP32-S3's dual-core architecture for
+  superior performance compared to Arduino Mega:
 
-  Hardware Requirements:
-  - ESP32-S3 board with RS-485 transceiver
-  - MAX485, MAX3485, or similar RS-485 transceiver
+  ARCHITECTURE:
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  Core 0 (PRO_CPU)              │  Core 1 (APP_CPU)                      │
+  │  ────────────────              │  ─────────────────                      │
+  │  PC Serial Task                │  Arduino loop()                         │
+  │  - High priority               │  - RS485 State Machine                  │
+  │  - Reads USB Serial            │  - Broadcasts export data               │
+  │  - Feeds lock-free FIFO        │  - Polls slaves                         │
+  │  - Forwards slave responses    │  - Processes responses                  │
+  └─────────────────────────────────────────────────────────────────────────┘
 
-  Waveshare ESP32-S3-RS485-CAN Pinout:
+  This dual-core design ensures that PC serial data is NEVER missed,
+  even during RS485 bus operations. The AVR Arduino Mega achieves similar
+  behavior through hardware interrupts, but the ESP32-S3's dual-core
+  FreeRTOS approach is cleaner and more scalable.
+
+  ADVANTAGES OVER ARDUINO MEGA:
+  - True parallel execution (not just ISR preemption)
+  - 4KB lock-free FIFO buffer (vs 128 bytes on Mega)
+  - 240MHz clock (vs 16MHz on Mega)
+  - Hardware RS485 direction control
+  - More GPIO and memory for future expansion
+
+  SUPPORTED HARDWARE:
+  - ESP32-S3 DevKitC
+  - Waveshare ESP32-S3-RS485-CAN
+  - Any ESP32-S3 board with RS-485 transceiver
+
+  NOTE: This implementation REQUIRES ESP32-S3. Other ESP32 variants
+  (original ESP32, S2, C3, etc.) are not supported due to different
+  core architectures.
+
+  WIRING for Waveshare ESP32-S3-RS485-CAN:
 
   ESP32-S3 Pin     RS-485 Transceiver
   ------------     ------------------
@@ -16,34 +46,41 @@
   GPIO 18 (RX) <-- RO  (Receiver Output)
   GPIO 21      --> DE + /RE (Direction Enable)
 
-  Power:
-  - VCC on transceiver -> 3.3V or 5V
-  - GND -> GND
-  - Connect 120 ohm termination resistor at bus ends
+  For custom boards, define pins before including DcsBios.h:
 
-  RS-485 Bus:
-  - A (non-inverting) connects to A on all devices
-  - B (inverting) connects to B on all devices
-  - Use twisted pair cable for A and B
+    #define RS485_TX_PIN 17
+    #define RS485_RX_PIN 18
+    #define TXENABLE_PIN 21
 
-  IMPORTANT: This implementation uses the ESP-IDF UART driver with
-  UART_MODE_RS485_HALF_DUPLEX for proper direction control timing.
+  For auto-direction RS-485 transceivers (hardware handles TX/RX switching):
+
+    #define TXENABLE_PIN -1
+
+  =============================================================================
 */
 
 // Required: Tell DCS-BIOS this is an RS-485 Master
 #define DCSBIOS_RS485_MASTER
+
+// Disable servo (not needed for master, saves memory)
 #define DCSBIOS_DISABLE_SERVO
+
+// -----------------------------------------------------------------------------
+// PIN CONFIGURATION for Waveshare ESP32-S3-RS485-CAN
+// -----------------------------------------------------------------------------
 
 // TX Enable pin for half-duplex direction control
 // Set to -1 if your board has auto-direction hardware
 #define TXENABLE_PIN 21
 
-// Configure UART pins for Waveshare ESP32-S3-RS485-CAN
+// UART pins for RS-485 bus
 #define RS485_TX_PIN 17
 #define RS485_RX_PIN 18
 
 // Use UART1 for RS-485 (UART0 is for USB/PC communication)
 #define RS485_UART_NUM 1
+
+// -----------------------------------------------------------------------------
 
 #include "DcsBios.h"
 
