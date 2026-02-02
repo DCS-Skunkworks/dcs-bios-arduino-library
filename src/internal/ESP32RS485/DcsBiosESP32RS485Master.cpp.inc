@@ -5,80 +5,30 @@
 
 namespace DcsBios {
 
-    // ============================================================================
-    // GLOBAL INSTANCES
-    // ============================================================================
+    // Global instances
+    RS485Master rs485master;
+    MasterPCConnection pcConnection;
 
-    RS485Master rs485Master;
-    TaskHandle_t pcSerialTaskHandle = NULL;
-
-    // ============================================================================
-    // PC SERIAL TASK - Runs on Core 0
-    // ============================================================================
-    // This task runs in parallel with the main Arduino loop (Core 1).
-    // It continuously reads from USB Serial and feeds the lock-free FIFO.
-    // Priority is set high to ensure we never miss incoming bytes.
-
-    void pcSerialTask(void* param) {
-        // Increase Serial RX buffer for extra safety
-        Serial.setRxBufferSize(1024);
-        Serial.begin(RS485_BAUD_RATE);
-
-        // Wait for Serial to initialize
-        while (!Serial && millis() < 3000) {
-            vTaskDelay(1);
-        }
-
-        // Main loop - runs forever on Core 0
-        for (;;) {
-            // Read all available bytes from Serial
-            while (Serial.available()) {
-                uint8_t c = Serial.read();
-                // Feed into lock-free FIFO (consumed by RS485 master on Core 1)
-                rs485Master.exportFifo.put(c);
-            }
-
-            // Forward any slave responses to PC
-            while (rs485Master.hasMessageData()) {
-                Serial.write(rs485Master.getMessageByte());
-            }
-
-            // Small yield to prevent watchdog issues, but keep responsive
-            // At 250kbaud, bytes arrive every 40us, so we check frequently
-            vTaskDelay(1);  // 1 tick = 1ms on default FreeRTOS config
-        }
-    }
-
-    // ============================================================================
-    // RS485 MASTER IMPLEMENTATION
-    // ============================================================================
+    // ========================================================================
+    // RS485 MASTER IMPLEMENTATION - Mirrors AVR exactly
+    // ========================================================================
 
     RS485Master::RS485Master()
         : uartNum((uart_port_t)RS485_UART_NUM),
           txEnablePin(TXENABLE_PIN),
-          rxPin(RS485_RX_PIN),
-          txPin(RS485_TX_PIN),
-          state(RS485State::IDLE),
-          currentPollAddr(1),
-          scanAddrCounter(1),
-          txLen(0),
-          txChecksum(0),
-          rxLen(0),
-          rxExpected(0),
-          rxMsgType(0),
-          opStartUs(0),
-          expectTimeoutAfterData(false),
-          skipTimeoutsAfterBroadcast(0),
-          broadcastCount(0),
-          pollCount(0),
-          responseCount(0),
-          messageOutHead(0),
-          messageOutTail(0)
+          state(IDLE),
+          poll_address(1),
+          poll_address_counter(1),
+          scan_address_counter(1),
+          rxtx_len(0),
+          rx_msgtype(0),
+          checksum(0),
+          rx_start_time(0)
     {
-        // Initialize slave tracking
-        slavePresent[0] = true;  // Broadcast address, always "present"
-        for (uint8_t i = 1; i <= RS485_MAX_SLAVES; i++) {
-            slavePresent[i] = false;
+        // Slave 0 is broadcast, mark as "present" to skip polling it
+        slave_present[0] = true;
+        for (uint8_t i = 1; i < 128; i++) {
+            slave_present[i] = false;
         }
     }
 
@@ -94,302 +44,265 @@ namespace DcsBios {
             .source_clk = UART_SCLK_DEFAULT
         };
 
-        // Install UART driver with larger buffers
-        ESP_ERROR_CHECK(uart_driver_install(uartNum, 512, 512, 0, NULL, 0));
-        ESP_ERROR_CHECK(uart_param_config(uartNum, &uart_config));
+        uart_driver_install(uartNum, 256, 256, 0, NULL, 0);
+        uart_param_config(uartNum, &uart_config);
+        uart_set_pin(uartNum, RS485_TX_PIN, RS485_RX_PIN, txEnablePin, UART_PIN_NO_CHANGE);
 
-        // Set pins - txEnablePin can be -1 for auto-direction boards
-        ESP_ERROR_CHECK(uart_set_pin(uartNum, txPin, rxPin, txEnablePin, UART_PIN_NO_CHANGE));
-
-        // Set RS485 mode
         if (txEnablePin >= 0) {
-            ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX));
-        } else {
-            ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_UART));
+            uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX);
         }
 
         uart_flush_input(uartNum);
     }
 
-    void RS485Master::advanceToNextSlave() {
-        static uint8_t scanCounter = 0;
+    void RS485Master::advancePollAddress() {
+        poll_address_counter = (poll_address_counter + 1) % 128;
 
-        // Every ~50 polls, probe an unknown address to discover new slaves
-        scanCounter++;
-        if (scanCounter >= 50) {
-            scanCounter = 0;
-
-            // Find an unknown address to probe
-            for (uint8_t i = 1; i <= RS485_MAX_SLAVES; i++) {
-                scanAddrCounter++;
-                if (scanAddrCounter > RS485_MAX_SLAVES) scanAddrCounter = 1;
-
-                if (!slavePresent[scanAddrCounter]) {
-                    currentPollAddr = scanAddrCounter;
-                    return;
-                }
-            }
+        // Advance to next present slave
+        while (!slave_present[poll_address_counter]) {
+            poll_address_counter = (poll_address_counter + 1) % 128;
         }
 
-        // Normal polling - find next known-present slave
-        for (uint8_t i = 0; i < RS485_MAX_SLAVES; i++) {
-            currentPollAddr++;
-            if (currentPollAddr > RS485_MAX_SLAVES) {
-                currentPollAddr = 1;
+        if (poll_address_counter == 0) {
+            // Instead of polling slave 0, scan for new device
+            scan_address_counter = (scan_address_counter + 1) % 128;
+            while (slave_present[scan_address_counter]) {
+                scan_address_counter = (scan_address_counter + 1) % 128;
             }
-            if (slavePresent[currentPollAddr]) {
-                break;
-            }
-        }
-    }
-
-    void RS485Master::startBroadcast() {
-        // Allow slaves to resync
-        delayMicroseconds(500);
-
-        // Drain FIFO into TX buffer (max 250 bytes per broadcast)
-        txLen = exportFifo.drain(txBuffer + 3, 250);
-
-        if (txLen == 0) {
-            state = RS485State::IDLE;
+            poll_address = scan_address_counter;
             return;
         }
 
-        // Build packet header: [Addr=0] [MsgType=0] [Length]
-        txBuffer[0] = RS485_ADDR_BROADCAST;
-        txBuffer[1] = RS485_MSGTYPE_POLL;
-        txBuffer[2] = (uint8_t)txLen;
-
-        // Calculate checksum
-        txChecksum = txBuffer[0] ^ txBuffer[1] ^ txBuffer[2];
-        for (size_t i = 0; i < txLen; i++) {
-            txChecksum ^= txBuffer[3 + i];
-        }
-
-        // Append checksum
-        txBuffer[3 + txLen] = txChecksum;
-
-        // Send entire packet at once (more efficient than byte-by-byte)
-        uart_write_bytes(uartNum, (const char*)txBuffer, 4 + txLen);
-
-        state = RS485State::BROADCAST_SENDING;
-        broadcastCount++;
-        skipTimeoutsAfterBroadcast = 10;
-    }
-
-    void RS485Master::startPoll(uint8_t addr) {
-        currentPollAddr = addr;
-        opStartUs = micros();
-
-        // Build poll packet: [Addr] [MsgType=0] [Length=0]
-        uint8_t pollPacket[3] = { addr, RS485_MSGTYPE_POLL, 0 };
-        uart_write_bytes(uartNum, (const char*)pollPacket, 3);
-
-        state = RS485State::POLL_SENDING;
-        pollCount++;
-    }
-
-    void RS485Master::handleResponse() {
-        if (currentPollAddr > 0 && currentPollAddr <= RS485_MAX_SLAVES) {
-            slavePresent[currentPollAddr] = true;
-        }
-        responseCount++;
-
-        // Forward command to PC if present
-        if (rxLen > 0 && rxMsgType == 0) {
-            for (size_t i = 0; i < rxLen; i++) {
-                putMessageByte(rxBuffer[i]);
-            }
-            // Ensure newline termination
-            if (rxLen > 0 && rxBuffer[rxLen - 1] != '\n') {
-                putMessageByte('\n');
-            }
-            expectTimeoutAfterData = true;
-        }
-    }
-
-    void RS485Master::handleTimeout() {
-        // Send 0x00 on behalf of non-responding slave
-        uint8_t zero = 0x00;
-        uart_write_bytes(uartNum, (const char*)&zero, 1);
-        uart_wait_tx_done(uartNum, 1);
-
-        if (expectTimeoutAfterData) {
-            expectTimeoutAfterData = false;
-            return;
-        }
-
-        if (skipTimeoutsAfterBroadcast > 0) {
-            skipTimeoutsAfterBroadcast--;
-            return;
-        }
-
-        // Mark as not present (will be scanned again later)
-        if (currentPollAddr > 0 && currentPollAddr <= RS485_MAX_SLAVES) {
-            slavePresent[currentPollAddr] = false;
-        }
-    }
-
-    void RS485Master::processRx() {
-        size_t available = 0;
-        uart_get_buffered_data_len(uartNum, &available);
-
-        if (available == 0) {
-            // Check timeout
-            uint32_t elapsed = micros() - opStartUs;
-            if (elapsed > RS485_POLL_TIMEOUT_US) {
-                handleTimeout();
-                uart_flush_input(uartNum);
-                advanceToNextSlave();
-                state = RS485State::IDLE;
-            }
-            return;
-        }
-
-        uint8_t byte;
-        int n;
-
-        switch (state) {
-            case RS485State::RX_WAIT_LENGTH:
-                n = uart_read_bytes(uartNum, &byte, 1, 0);
-                if (n == 1) {
-                    if (byte == 0x00) {
-                        // Empty response
-                        handleResponse();
-                        uart_flush_input(uartNum);
-                        advanceToNextSlave();
-                        state = RS485State::IDLE;
-                    } else {
-                        rxExpected = byte;
-                        rxLen = 0;
-                        state = RS485State::RX_WAIT_MSGTYPE;
-                    }
-                    opStartUs = micros();
-                }
-                break;
-
-            case RS485State::RX_WAIT_MSGTYPE:
-                n = uart_read_bytes(uartNum, &byte, 1, 0);
-                if (n == 1) {
-                    rxMsgType = byte;
-                    state = (rxExpected > 0) ? RS485State::RX_WAIT_DATA : RS485State::RX_WAIT_CHECKSUM;
-                    opStartUs = micros();
-                }
-                break;
-
-            case RS485State::RX_WAIT_DATA:
-                while (available > 0 && rxLen < rxExpected) {
-                    n = uart_read_bytes(uartNum, &byte, 1, 0);
-                    if (n != 1) break;
-                    if (rxLen < sizeof(rxBuffer)) {
-                        rxBuffer[rxLen] = byte;
-                    }
-                    rxLen++;
-                    available--;
-                    opStartUs = micros();
-                }
-                if (rxLen >= rxExpected) {
-                    state = RS485State::RX_WAIT_CHECKSUM;
-                }
-                break;
-
-            case RS485State::RX_WAIT_CHECKSUM:
-                n = uart_read_bytes(uartNum, &byte, 1, 0);
-                if (n == 1) {
-                    if (byte == RS485_CHECKSUM) {
-                        handleResponse();
-                    }
-                    uart_flush_input(uartNum);
-                    advanceToNextSlave();
-                    state = RS485State::IDLE;
-                }
-                break;
-
-            default:
-                break;
-        }
-
-        // RX timeout check
-        if (state >= RS485State::RX_WAIT_LENGTH && state <= RS485State::RX_WAIT_CHECKSUM) {
-            if ((micros() - opStartUs) > RS485_RX_TIMEOUT_US) {
-                handleTimeout();
-                uart_flush_input(uartNum);
-                advanceToNextSlave();
-                state = RS485State::IDLE;
-            }
-        }
+        poll_address = poll_address_counter;
     }
 
     void RS485Master::loop() {
-        switch (state) {
-            case RS485State::IDLE:
-                // Priority: broadcast export data first, then poll slaves
-                if (!exportFifo.isEmpty()) {
-                    startBroadcast();
-                } else {
-                    startPoll(currentPollAddr);
-                }
-                break;
+        // Read from RS485 bus if in RX state
+        size_t available = 0;
+        uart_get_buffered_data_len(uartNum, &available);
 
-            case RS485State::BROADCAST_SENDING:
-                // Wait for TX complete
-                if (uart_wait_tx_done(uartNum, 0) == ESP_OK) {
+        // Process RX data
+        while (available > 0 && state >= RX_WAIT_DATALENGTH && state <= RX_WAIT_CHECKSUM) {
+            uint8_t c;
+            if (uart_read_bytes(uartNum, &c, 1, 0) != 1) break;
+            available--;
+
+            switch (state) {
+                case RX_WAIT_DATALENGTH:
+                    rxtx_len = c;
+                    slave_present[poll_address] = true;
+                    if (rxtx_len > 0) {
+                        state = RX_WAIT_MSGTYPE;
+                    } else {
+                        state = IDLE;
+                    }
+                    rx_start_time = micros();
+                    break;
+
+                case RX_WAIT_MSGTYPE:
+                    rx_msgtype = c;
+                    state = RX_WAIT_DATA;
+                    rx_start_time = micros();
+                    break;
+
+                case RX_WAIT_DATA:
+                    messageBuffer.put(c);
+                    rxtx_len--;
+                    if (rxtx_len == 0) {
+                        state = RX_WAIT_CHECKSUM;
+                    }
+                    rx_start_time = micros();
+                    break;
+
+                case RX_WAIT_CHECKSUM:
+                    // Checksum received (ignore validation like AVR)
+                    messageBuffer.complete = true;
+                    state = IDLE;
+                    break;
+            }
+        }
+
+        // State machine - IDLE state handling
+        if (state == IDLE) {
+            if (exportData.isNotEmpty()) {
+                // We have export data to send - start broadcast
+                rxtx_len = exportData.getLength();
+                checksum = 0;
+
+                // Send address byte (0 = broadcast)
+                uint8_t addr = 0;
+                uart_write_bytes(uartNum, (const char*)&addr, 1);
+                state = TX_ADDRESS_SENT;
+
+            } else if (messageBuffer.isEmpty() && !messageBuffer.complete) {
+                // Message buffer free, poll a device
+                advancePollAddress();
+
+                uint8_t addr = poll_address;
+                uart_write_bytes(uartNum, (const char*)&addr, 1);
+                state = POLL_ADDRESS_SENT;
+
+            } else {
+                pcConnection.checkTimeout();
+            }
+        }
+
+        // TX state machine - send bytes one at a time (like AVR UDRE ISR)
+        // Check if UART TX is ready
+        size_t txFree = 0;
+        uart_get_tx_buffer_free_size(uartNum, &txFree);
+
+        if (txFree > 0) {
+            uint8_t txByte;
+
+            switch (state) {
+                case POLL_ADDRESS_SENT:
+                    txByte = 0;  // msgtype
+                    uart_write_bytes(uartNum, (const char*)&txByte, 1);
+                    state = POLL_MSGTYPE_SENT;
+                    break;
+
+                case POLL_MSGTYPE_SENT:
+                    txByte = 0;  // data length = 0 for poll
+                    uart_write_bytes(uartNum, (const char*)&txByte, 1);
+                    state = POLL_DATALENGTH_SENT;
+                    break;
+
+                case POLL_DATALENGTH_SENT:
+                    // Wait for TX complete, then switch to RX
+                    uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
                     uart_flush_input(uartNum);
-                    state = RS485State::IDLE;
-                }
-                break;
+                    rx_start_time = micros();
+                    state = RX_WAIT_DATALENGTH;
+                    break;
 
-            case RS485State::POLL_SENDING:
-                // Wait for TX complete, then switch to RX
-                if (uart_wait_tx_done(uartNum, 0) == ESP_OK) {
-                    rxLen = 0;
-                    rxExpected = 0;
-                    rxMsgType = 0;
-                    opStartUs = micros();
-                    state = RS485State::RX_WAIT_LENGTH;
-                }
-                break;
+                case TX_ADDRESS_SENT:
+                    txByte = 0;  // msgtype
+                    uart_write_bytes(uartNum, (const char*)&txByte, 1);
+                    state = TX_MSGTYPE_SENT;
+                    break;
 
-            case RS485State::RX_WAIT_LENGTH:
-            case RS485State::RX_WAIT_MSGTYPE:
-            case RS485State::RX_WAIT_DATA:
-            case RS485State::RX_WAIT_CHECKSUM:
-                processRx();
-                break;
+                case TX_MSGTYPE_SENT:
+                    txByte = rxtx_len;  // data length
+                    uart_write_bytes(uartNum, (const char*)&txByte, 1);
+                    state = TX;
+                    break;
 
-            default:
-                state = RS485State::IDLE;
-                break;
+                case TX:
+                    if (rxtx_len == 0) {
+                        // Send checksum
+                        uart_write_bytes(uartNum, (const char*)&checksum, 1);
+                        state = TX_CHECKSUM_SENT;
+                    } else {
+                        // Send next data byte from export buffer
+                        txByte = exportData.get();
+                        checksum ^= txByte;
+                        uart_write_bytes(uartNum, (const char*)&txByte, 1);
+                        rxtx_len--;
+                    }
+                    break;
+
+                case TX_CHECKSUM_SENT:
+                    // Wait for TX complete
+                    uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+                    state = IDLE;
+                    break;
+
+                case TIMEOUT_ZEROBYTE_SENT:
+                    uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+                    state = IDLE;
+                    break;
+            }
+        }
+
+        // Timeout handling for non-existing devices (1ms like AVR)
+        if (state == RX_WAIT_DATALENGTH && (micros() - rx_start_time) > 1000) {
+            slave_present[poll_address] = false;
+            // Send zero byte on behalf of non-existing device
+            uint8_t zero = 0;
+            uart_write_bytes(uartNum, (const char*)&zero, 1);
+            state = TIMEOUT_ZEROBYTE_SENT;
+        }
+
+        // Timeout during message reception (5ms like AVR)
+        if ((state == RX_WAIT_MSGTYPE || state == RX_WAIT_DATA || state == RX_WAIT_CHECKSUM)
+            && (micros() - rx_start_time) > 5000) {
+            messageBuffer.clear();
+            messageBuffer.put('\n');
+            messageBuffer.complete = true;
+            state = IDLE;
         }
     }
 
-    // ============================================================================
+    // ========================================================================
+    // PC CONNECTION IMPLEMENTATION - Mirrors AVR exactly
+    // ========================================================================
+
+    MasterPCConnection::MasterPCConnection() : tx_start_time(0) {}
+
+    void MasterPCConnection::begin() {
+        Serial.begin(RS485_BAUD_RATE);
+        while (!Serial && millis() < 3000) {
+            delay(1);
+        }
+    }
+
+    void MasterPCConnection::rxProcess() {
+        // Read ALL available bytes from PC and feed to RS485 master
+        // This mimics the AVR USART0_RX ISR which fires on every byte
+        while (Serial.available()) {
+            uint8_t c = Serial.read();
+            rs485master.feedExportByte(c);
+        }
+    }
+
+    void MasterPCConnection::txProcess() {
+        // Send slave responses to PC
+        // This mimics the AVR USART0_UDRE ISR
+        if (rs485master.messageBuffer.isEmpty()) {
+            if (rs485master.messageBuffer.complete) {
+                rs485master.messageBuffer.complete = false;
+            }
+            return;
+        }
+
+        // Send all available bytes
+        while (rs485master.messageBuffer.isNotEmpty()) {
+            Serial.write(rs485master.messageBuffer.get());
+        }
+        tx_start_time = micros();
+    }
+
+    void MasterPCConnection::checkTimeout() {
+        if (rs485master.messageBuffer.isNotEmpty() && (micros() - tx_start_time) > 5000) {
+            rs485master.messageBuffer.clear();
+            rs485master.messageBuffer.put('\n');
+            rs485master.messageBuffer.complete = true;
+        }
+    }
+
+    // ========================================================================
     // DCSBIOS SETUP AND LOOP
-    // ============================================================================
+    // ========================================================================
 
     void setup() {
-        // Initialize RS485 Master (runs on Core 1 with Arduino loop)
-        rs485Master.begin();
-
-        // Create PC Serial task on Core 0 with high priority
-        // This ensures continuous serial reception in parallel with RS485 ops
-        xTaskCreatePinnedToCore(
-            pcSerialTask,           // Task function
-            "PCSerial",             // Name
-            4096,                   // Stack size (bytes)
-            NULL,                   // Parameters
-            configMAX_PRIORITIES - 1, // High priority
-            &pcSerialTaskHandle,    // Task handle
-            0                       // Core 0 (PRO_CPU)
-        );
-
-        // Small delay to let the task start
-        delay(100);
+        pcConnection.begin();
+        rs485master.begin();
     }
 
     void loop() {
-        // RS485 state machine runs on Core 1 (APP_CPU) with Arduino loop
-        rs485Master.loop();
+        // CRITICAL: Read from PC Serial FIRST, every loop iteration
+        // This mimics the AVR behavior where USART0_RX ISR fires on every byte
+        pcConnection.rxProcess();
+
+        // Run RS485 state machine
+        rs485master.loop();
+
+        // Send any slave responses to PC
+        pcConnection.txProcess();
+
+        // Read again to minimize latency
+        pcConnection.rxProcess();
     }
 
 }  // namespace DcsBios
