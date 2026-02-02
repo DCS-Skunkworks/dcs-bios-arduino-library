@@ -14,6 +14,9 @@
 #include "Arduino.h"
 #include <stdint.h>
 #include <driver/uart.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
 
 #include "../RingBuffer.h"  // Use library's existing RingBuffer
 
@@ -38,47 +41,58 @@
 #endif
 
 #define RS485_BAUD_RATE 250000
-#define RS485_MAX_SLAVES 32
+
+// Buffer sizes - larger to handle burst data
+#define PC_SERIAL_RX_BUFFER_SIZE 1024   // ~40ms at 250kbaud
+#define RS485_RX_BUFFER_SIZE 512
+#define RS485_TX_BUFFER_SIZE 512
 
 namespace DcsBios {
 
     // ============================================================================
-    // RS485 MASTER - Mimics AVR implementation exactly
+    // RS485 MASTER - Uses UART event queue for non-blocking operation
     // ============================================================================
 
     class RS485Master {
     public:
         // Export data buffer - fed by PC serial, drained to slaves
-        // 128 bytes like AVR
-        RingBuffer<128> exportData;
+        RingBuffer<256> exportData;  // Larger buffer
 
         // Message buffer for slave responses to PC
-        RingBuffer<32> messageBuffer;
+        RingBuffer<64> messageBuffer;  // Larger buffer
 
         // Slave tracking
         volatile bool slave_present[128];
 
-        // State machine
+        // State machine - includes TX_WAIT states for non-blocking operation
         volatile uint8_t state;
         enum State {
             IDLE,
+            // Polling states
             POLL_ADDRESS_SENT,
             POLL_MSGTYPE_SENT,
             POLL_DATALENGTH_SENT,
-            TIMEOUT_ZEROBYTE_SENT,
+            POLL_WAIT_TX_DONE,          // Wait for TX complete (non-blocking)
+            // RX states
             RX_WAIT_DATALENGTH,
             RX_WAIT_MSGTYPE,
             RX_WAIT_DATA,
             RX_WAIT_CHECKSUM,
+            // Timeout state
+            TIMEOUT_ZEROBYTE_SENT,
+            TIMEOUT_WAIT_TX_DONE,
+            // Broadcast TX states
             TX_ADDRESS_SENT,
             TX_MSGTYPE_SENT,
             TX,
-            TX_CHECKSUM_SENT
+            TX_CHECKSUM_SENT,
+            TX_WAIT_TX_DONE
         };
 
     private:
         uart_port_t uartNum;
         int txEnablePin;
+        QueueHandle_t uartEventQueue;   // UART event queue for TX_DONE
 
         volatile uint8_t poll_address;
         volatile uint8_t poll_address_counter;
@@ -87,36 +101,38 @@ namespace DcsBios {
         volatile uint8_t rx_msgtype;
         volatile uint8_t checksum;
         volatile uint32_t rx_start_time;
+        volatile bool txDoneFlag;       // Set by event processing
 
         void advancePollAddress();
+        void processUartEvents();       // Process UART event queue
 
     public:
         RS485Master();
         void begin();
         void loop();
 
-        // Called from main loop to feed export data (mimics AVR rxISR)
+        // Called to feed export data (from PC serial task)
         inline void feedExportByte(uint8_t c) {
             exportData.put(c);
         }
     };
 
     // ============================================================================
-    // PC CONNECTION - Mimics AVR MasterPCConnection
+    // PC CONNECTION - Uses dedicated high-priority task for reading
     // ============================================================================
 
     class MasterPCConnection {
     private:
         volatile uint32_t tx_start_time;
+        TaskHandle_t rxTaskHandle;      // Handle for RX task
+
+        static void rxTaskFunc(void* param);  // FreeRTOS task function
 
     public:
         MasterPCConnection();
         void begin();
 
-        // Read from PC Serial, feed to RS485 master (mimics AVR rxISR behavior)
-        void rxProcess();
-
-        // Send slave responses to PC (mimics AVR udreISR behavior)
+        // Send slave responses to PC
         void txProcess();
 
         void checkTimeout();
