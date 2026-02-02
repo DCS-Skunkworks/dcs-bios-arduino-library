@@ -6,7 +6,8 @@
 
 #include "Arduino.h"
 #include <stdint.h>
-#include <HardwareSerial.h>
+#include <driver/uart.h>
+#include <driver/gpio.h>
 
 #include "../RingBuffer.h"
 
@@ -19,202 +20,149 @@
 #endif
 
 #ifndef RS485_RX_PIN
-#define RS485_RX_PIN 16  // Default RX pin for UART1
+#define RS485_RX_PIN 16
 #endif
 
 #ifndef RS485_TX_PIN
-#define RS485_TX_PIN 17  // Default TX pin for UART1
+#define RS485_TX_PIN 17
 #endif
 
-// TX Enable pin for RS485 transceiver (directly from sketch define)
+// TX Enable pin for RS485 transceiver
+// Can be set to -1 for auto-direction boards
 #ifndef TXENABLE_PIN
-#error "TXENABLE_PIN must be defined for RS485 Master mode"
+#error "TXENABLE_PIN must be defined for RS485 Master mode (use -1 for auto-direction boards)"
 #endif
 
-// PC connection uses default USB Serial (UART0)
 // Baud rate for RS485 bus (must match DCS-BIOS protocol)
 #define RS485_BAUD_RATE 250000
 
-// Protocol state definitions (must match Protocol.h)
-#ifndef DCSBIOS_STATE_WAIT_FOR_SYNC
-#define DCSBIOS_STATE_WAIT_FOR_SYNC 0
-#define DCSBIOS_STATE_ADDRESS_LOW 1
-#define DCSBIOS_STATE_ADDRESS_HIGH 2
-#define DCSBIOS_STATE_COUNT_LOW 3
-#define DCSBIOS_STATE_COUNT_HIGH 4
-#define DCSBIOS_STATE_DATA_LOW 5
-#define DCSBIOS_STATE_DATA_HIGH 6
-#endif
+// Protocol constants
+#define RS485_ADDR_BROADCAST 0
+#define RS485_MSGTYPE_POLL 0
+#define RS485_CHECKSUM_PLACEHOLDER 0x72
+
+// Timeout constants (microseconds)
+#define RS485_POLL_TIMEOUT_US 1500
+#define RS485_RX_TIMEOUT_US 5000
+
+// Maximum slaves on bus
+#define RS485_MAX_SLAVES 32
+
+// Export buffer size (FIFO for raw data relay)
+#define RS485_EXPORT_FIFO_SIZE 512
+
+// Input buffer size for slave responses
+#define RS485_INPUT_BUFFER_SIZE 64
 
 namespace DcsBios {
 
-    // Forward declaration
-    extern void eouDetected();
-
     /**
-     * EndOfUpdateDetector - Detects end-of-update markers in the export stream
-     * Same implementation as AVR version for protocol compatibility
+     * RS485 State Machine States
      */
-    class EndOfUpdateDetector {
-        uint8_t state;
-        uint16_t address;
-        uint16_t count;
-        uint16_t data;
-        uint8_t sync_byte_count;
-
-    public:
-        EndOfUpdateDetector() : state(0), address(0), count(0), data(0), sync_byte_count(0) {}
-
-        void processChar(uint8_t c) {
-            switch(state) {
-                case DCSBIOS_STATE_WAIT_FOR_SYNC:
-                    break;
-
-                case DCSBIOS_STATE_ADDRESS_LOW:
-                    address = (unsigned int)c;
-                    state = DCSBIOS_STATE_ADDRESS_HIGH;
-                    break;
-
-                case DCSBIOS_STATE_ADDRESS_HIGH:
-                    address = (c << 8) | address;
-                    if (address != 0x5555) {
-                        state = DCSBIOS_STATE_COUNT_LOW;
-                    } else {
-                        state = DCSBIOS_STATE_WAIT_FOR_SYNC;
-                    }
-                    break;
-
-                case DCSBIOS_STATE_COUNT_LOW:
-                    count = (unsigned int)c;
-                    state = DCSBIOS_STATE_COUNT_HIGH;
-                    break;
-
-                case DCSBIOS_STATE_COUNT_HIGH:
-                    count = (c << 8) | count;
-                    state = DCSBIOS_STATE_DATA_LOW;
-                    break;
-
-                case DCSBIOS_STATE_DATA_LOW:
-                    data = (unsigned int)c;
-                    count--;
-                    state = DCSBIOS_STATE_DATA_HIGH;
-                    break;
-
-                case DCSBIOS_STATE_DATA_HIGH:
-                    data = (c << 8) | data;
-                    count--;
-                    if (address == 0xfffe) eouDetected();
-                    address += 2;
-                    if (count == 0)
-                        state = DCSBIOS_STATE_ADDRESS_LOW;
-                    else
-                        state = DCSBIOS_STATE_DATA_LOW;
-                    break;
-            }
-
-            if (c == 0x55)
-                sync_byte_count++;
-            else
-                sync_byte_count = 0;
-
-            if (sync_byte_count == 4) {
-                state = DCSBIOS_STATE_ADDRESS_LOW;
-                sync_byte_count = 0;
-            }
-        }
+    enum class RS485State : uint8_t {
+        IDLE,
+        BROADCAST_MSGTYPE,
+        BROADCAST_LENGTH,
+        BROADCAST_DATA,
+        BROADCAST_CHECKSUM,
+        BROADCAST_WAIT_COMPLETE,
+        POLL_MSGTYPE,
+        POLL_LENGTH,
+        POLL_WAIT_COMPLETE,
+        RX_WAIT_LENGTH,
+        RX_WAIT_MSGTYPE,
+        RX_WAIT_DATA,
+        RX_WAIT_CHECKSUM
     };
 
     /**
      * RS485Master - Handles communication with RS485 slave devices
-     *
-     * This is a single-bus implementation for ESP32. For multiple buses,
-     * instantiate multiple RS485Master objects with different UART numbers.
+     * Uses ESP-IDF UART driver for proper RS485 half-duplex support
      */
     class RS485Master {
     private:
-        HardwareSerial* serial;
-        uint8_t txEnablePin;
+        uart_port_t uartNum;
+        int txEnablePin;
+        int rxPin;
+        int txPin;
 
-        volatile uint8_t poll_address;
-        volatile uint8_t scan_address_counter;
-        volatile uint8_t poll_address_counter;
-        volatile unsigned long rx_start_time;
+        // State machine
+        volatile RS485State state;
 
-        volatile uint8_t rxtx_len;
-        volatile uint8_t rx_msgtype;
-        volatile uint8_t checksum;
+        // Polling state
+        volatile uint8_t currentPollAddr;
+        volatile uint8_t pollAddrCounter;
+        volatile uint8_t scanAddrCounter;
+        volatile bool isScanning;
+        volatile bool slavePresent[RS485_MAX_SLAVES + 1];
 
-        void advancePollAddress();
+        // TX state
+        uint8_t txExportData[512];
+        size_t txExportLen;
+        size_t txExportIdx;
+        uint8_t txChecksum;
 
-        inline void setTxEnable() {
-            digitalWrite(txEnablePin, HIGH);
-        }
+        // RX state
+        uint8_t rxBuffer[RS485_INPUT_BUFFER_SIZE];
+        size_t rxLen;
+        size_t rxExpected;
+        uint8_t rxMsgType;
 
-        inline void clearTxEnable() {
-            digitalWrite(txEnablePin, LOW);
-        }
+        // Timing
+        volatile uint32_t opStartUs;
 
-        inline void txByte(uint8_t c) {
-            setTxEnable();
-            serial->write(c);
-        }
+        // Export data FIFO (raw bytes from PC)
+        uint8_t exportFifo[RS485_EXPORT_FIFO_SIZE];
+        volatile size_t exportHead;
+        volatile size_t exportTail;
+        volatile size_t exportCount;
 
-        inline void flushTx() {
-            serial->flush();  // Wait for TX to complete
-        }
+        // Message buffer for slave responses (to forward to PC)
+        DcsBios::RingBuffer<64> messageBuffer;
+
+        // Expected timeout tracking
+        volatile bool expectTimeoutAfterData;
+        volatile uint8_t skipTimeoutsAfterBroadcast;
+
+        // Internal methods
+        void advanceToNextSlave();
+        void prepareExportData();
+        void startBroadcast();
+        void processBroadcastTx();
+        void startPoll(uint8_t addr);
+        void processPollTx();
+        void processRx();
+        void handleResponse();
+        void handleTimeout();
+        void processInputCommand(const uint8_t* data, size_t len);
 
     public:
-        static RS485Master* firstRS485Master;
-        RS485Master* nextRS485Master;
-
-        DcsBios::RingBuffer<128> exportData;
-        DcsBios::RingBuffer<32> messageBuffer;
-        volatile bool slave_present[128];
-        volatile uint8_t state;
-
-        enum RS485State {
-            IDLE,
-            POLL_ADDRESS_SENT,
-            POLL_MSGTYPE_SENT,
-            POLL_DATALENGTH_SENT,
-            TIMEOUT_ZEROBYTE_SENT,
-            RX_WAIT_DATALENGTH,
-            RX_WAIT_MSGTYPE,
-            RX_WAIT_DATA,
-            RX_WAIT_CHECKSUM,
-            TX_ADDRESS_SENT,
-            TX_MSGTYPE_SENT,
-            TX,
-            TX_CHECKSUM_SENT
-        };
-
-        RS485Master(HardwareSerial* serial, uint8_t txEnablePin, int8_t rxPin = -1, int8_t txPin = -1);
+        RS485Master();
         void begin();
         void loop();
+        void feedExportData(uint8_t byte);
+        bool hasMessageData();
+        uint8_t getMessageByte();
     };
 
-    // Static member initialization
-    RS485Master* RS485Master::firstRS485Master = NULL;
-
     /**
-     * MasterPCConnection - Handles communication with the PC running DCS-BIOS
-     * Uses the default Serial (USB) connection
+     * MasterPCConnection - Handles communication with PC running DCS-BIOS
      */
     class MasterPCConnection {
     private:
-        volatile unsigned long tx_start_time;
-        void advanceTxBuffer();
+        volatile uint32_t txStartTime;
 
     public:
-        RS485Master* next_tx_rs485_master;
-
         MasterPCConnection();
         void begin();
         void loop();
         void rxLoop();
         void txLoop();
-        void checkTimeout();
     };
+
+    // Global instances
+    extern RS485Master rs485Master;
+    extern MasterPCConnection pcConnection;
 
     void setup();
     void loop();

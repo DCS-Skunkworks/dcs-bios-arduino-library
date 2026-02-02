@@ -15,29 +15,26 @@
   ---------        ------------------
   GPIO 17 (TX) --> DI  (Driver Input)
   GPIO 16 (RX) <-- RO  (Receiver Output)
-  GPIO 4       --> DE + /RE (Driver Enable, active low Receiver Enable)
+  GPIO 4       --> DE + /RE (Direction Enable, active high)
 
   The DE and /RE pins should be tied together for half-duplex operation.
+  The ESP32's UART hardware controls the direction pin automatically
+  when using UART_MODE_RS485_HALF_DUPLEX.
 
-  Optional: To use different pins, define them before including DcsBios.h:
+  For auto-direction RS-485 boards (hardware handles TX/RX switching):
+    #define TXENABLE_PIN -1
 
-    #define RS485_TX_PIN 17
-    #define RS485_RX_PIN 16
-    #define TXENABLE_PIN 4
-
-  Note: This implementation uses a single RS-485 bus (UART1).
-  Unlike the Arduino Mega version which supports 3 buses, the ESP32
-  implementation focuses on simplicity and reliability with a single bus.
-
-  For most cockpit builds, a single RS-485 bus with properly addressed
-  slaves is sufficient and simplifies wiring.
+  IMPORTANT: This implementation uses the ESP-IDF UART driver for proper
+  RS-485 half-duplex timing, not Arduino's HardwareSerial.
 */
 
 // Required: Tell DCS-BIOS this is an RS-485 Master
 #define DCSBIOS_RS485_MASTER
+#define DCSBIOS_DISABLE_SERVO
 
 // Required: Define the TX Enable pin for the RS-485 transceiver
 // This pin controls DE (Driver Enable) and /RE (Receiver Enable)
+// Set to -1 for auto-direction boards
 #define TXENABLE_PIN 4
 
 // Optional: Define custom UART pins (defaults shown)
