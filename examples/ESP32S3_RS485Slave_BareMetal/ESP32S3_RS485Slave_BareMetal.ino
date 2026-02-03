@@ -750,39 +750,20 @@ static void sendResponse() {
 
     size_t totalBytes = 3 + len;
 
-    // DEBUG: Show exactly what we're sending
-    DBGF("[TX SEND len=%d total=%d data=", len, totalBytes);
-    for (size_t i = 0; i < totalBytes && i < 20; i++) {
-        DBGF("%02X ", packet[i]);
-    }
-    DBGLN("]");
-
     // =========================================================================
     // HARDWARE RS485 MAGIC HAPPENS HERE
     // =========================================================================
-    // When we call uart_write_bytes():
-    // 1. Data is copied to TX FIFO
-    // 2. Hardware IMMEDIATELY asserts DE (RTS pin goes HIGH)
-    // 3. UART transmits all bytes
-    // 4. After LAST STOP BIT, hardware deasserts DE (RTS goes LOW)
-    //
-    // All of this happens WITHOUT ANY SOFTWARE INTERVENTION!
-    // The timing is cycle-accurate to the UART baud clock.
+    // CRITICAL: TX must happen IMMEDIATELY after poll received!
+    // Any delay (including debug prints) will cause Master timeout!
     // =========================================================================
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
 
     // Wait for TX to complete before returning to RX state
-    // This ensures the hardware has finished transmitting
     esp_err_t txResult = uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
-    DBGF("[TX DONE result=%d]\n", txResult);
 
-    // CRITICAL: Flush any echo bytes that may have been received during TX
-    // Even with hardware RS485 mode, transceiver settling can cause brief echoes
+    // Flush any echo bytes
     size_t echoBytes = 0;
     uart_get_buffered_data_len(uartNum, &echoBytes);
-    if (echoBytes > 0) {
-        DBGF("[TX ECHO flushing %d bytes]\n", echoBytes);
-    }
     uart_flush_input(uartNum);
 
     // Reset timing reference after TX
@@ -794,7 +775,16 @@ static void sendResponse() {
 
     // Return to RX state
     rs485State = STATE_RX_WAIT_ADDRESS;
-    DBGLN("[TX COMPLETE->RX]");
+
+    // DEBUG: Print AFTER TX is complete (doesn't affect timing!)
+    DBGF("[TX SENT %d bytes", totalBytes);
+    if (echoBytes > 0) {
+        DBGF(" echo=%d", echoBytes);
+    }
+    if (txResult != 0) {
+        DBGF(" err=%d", txResult);
+    }
+    DBGLN("]");
 }
 
 /**
@@ -1025,13 +1015,14 @@ static void processRS485() {
                 dbgPollCount++;
 #endif
                 if (!messageBuffer.complete) {
-                    DBGVLN("[POLL->TX0]");  // Poll received, sending zero-length
+                    // No data to send - respond immediately with zero-length
                     sendZeroLengthResponse();
                 } else {
 #if DEBUG_MODE
                     dbgTxCount++;
 #endif
-                    DBGF("[TX%d]\n", messageBuffer.getLength());  // Sending data (keep visible)
+                    // CRITICAL: Call sendResponse() IMMEDIATELY!
+                    // Debug output is printed AFTER TX inside the function.
                     sendResponse();
                 }
             } else {
