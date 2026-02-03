@@ -259,6 +259,14 @@ public:
     }
 
     void init() {
+        // Select appropriate clock source for each ESP32 variant
+        // C3/C6/H2 use different clock constants than classic ESP32/S2/S3
+        #if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32H2
+            #define UART_CLK_SOURCE UART_SCLK_XTAL
+        #else
+            #define UART_CLK_SOURCE UART_SCLK_APB
+        #endif
+
         uart_config_t uart_config = {
             .baud_rate = RS485_BAUD_RATE,
             .data_bits = UART_DATA_8_BITS,
@@ -266,7 +274,7 @@ public:
             .stop_bits = UART_STOP_BITS_1,
             .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
             .rx_flow_ctrl_thresh = 0,
-            .source_clk = UART_SCLK_DEFAULT
+            .source_clk = UART_CLK_SOURCE
         };
 
         ESP_ERROR_CHECK(uart_driver_install(uartNum, UART_RX_BUFFER_SIZE,
@@ -527,6 +535,11 @@ static void txTask(void* param) {
             // Send on the specified UART
             uart_write_bytes(request.uartNum, (const char*)request.data, request.length);
             uart_wait_tx_done(request.uartNum, pdMS_TO_TICKS(50));
+
+            // Critical: Flush RX buffer after TX
+            // Some ESP32 variants (especially S2) may echo TX data into RX buffer
+            // in RS485 half-duplex mode. Clear it before listening for response.
+            uart_flush_input(request.uartNum);
 
             // Find the bus that owns this UART and clear its txBusy flag
             RS485Master* bus = RS485Master::first;
