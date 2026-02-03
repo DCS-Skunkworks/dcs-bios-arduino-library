@@ -1,19 +1,25 @@
 /**
  * =============================================================================
- * ESP32-S3 RS485 MASTER - BARE METAL IMPLEMENTATION
+ * ESP32 RS485 MASTER - BARE METAL IMPLEMENTATION
  * =============================================================================
  *
- * Protocol-perfect RS485 Master for DCS-BIOS using ESP32-S3 hardware RS485 mode.
+ * Protocol-perfect RS485 Master for DCS-BIOS using ESP32 hardware RS485 mode.
  *
- * This implementation uses the SAME hardware RS485 approach that works perfectly
- * for the Slave: UART_MODE_RS485_HALF_DUPLEX with uart_wait_tx_done().
+ * SUPPORTED ESP32 VARIANTS:
+ * - ESP32 (Classic)    - Dual-core, UART0 via USB-to-serial chip
+ * - ESP32-S2           - Single-core, Native USB CDC
+ * - ESP32-S3           - Dual-core, Native USB CDC
+ * - ESP32-C3           - Single-core RISC-V, USB Serial/JTAG
+ * - ESP32-C6           - Single-core RISC-V, USB Serial/JTAG
+ *
+ * All variants support UART_MODE_RS485_HALF_DUPLEX for hardware DE control.
  *
  * =============================================================================
  * MASTER ROLE
  * =============================================================================
  *
  * The Master is the bus orchestrator:
- * 1. Receives export data from PC via USB CDC
+ * 1. Receives export data from PC via Serial (USB or UART depending on chip)
  * 2. Broadcasts export data to all slaves (address 0)
  * 3. Polls each slave in round-robin sequence
  * 4. Receives slave responses and forwards to PC
@@ -42,14 +48,14 @@
  *   - 5ms: If incomplete message, abort and reset
  *
  * =============================================================================
- * HARDWARE CONFIGURATION
+ * HARDWARE CONFIGURATION (adjust pins for your board)
  * =============================================================================
  *
- * Device: ESP32-S3 (Waveshare ESP32-S3-RS485-CAN or compatible)
+ * Default pins are for Waveshare ESP32-S3-RS485-CAN:
  * TX Pin: GPIO 17 → RS485 DI
  * RX Pin: GPIO 18 ← RS485 RO
- * DE Pin: GPIO 21 → RS485 DE (Hardware-controlled via RTS)
- * USB:    Native USB CDC for PC communication
+ * DE Pin: GPIO 21 → RS485 DE (Hardware-controlled via RTS), or -1 for auto-dir
+ * Serial: USB CDC (S2/S3) or UART0 (Classic ESP32)
  * Speed:  250,000 bps (8N1)
  *
  * =============================================================================
@@ -101,12 +107,11 @@
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
 
-// Use native USB CDC on ESP32-S3
-#if CONFIG_IDF_TARGET_ESP32S3
-    #define PC_SERIAL Serial    // Native USB CDC
-#else
-    #error "This implementation requires ESP32-S3"
-#endif
+// PC Serial - works on ALL ESP32 variants:
+// - ESP32 Classic: UART0 via external USB-to-serial chip
+// - ESP32-S2/S3: Native USB CDC
+// - ESP32-C3/C6: USB Serial/JTAG or UART0 (configurable)
+#define PC_SERIAL Serial
 
 // ============================================================================
 // FREERTOS TX TASK CONFIGURATION
@@ -272,7 +277,8 @@ static void initRS485Hardware() {
         while (1) { delay(1000); }  // Halt on failure
     }
 
-    // Create dedicated TX task - runs on Core 1 (same as loop)
+    // Create dedicated TX task
+    // Using tskNO_AFFINITY for compatibility with single-core ESP32 variants (S2, C3, C6)
     // Higher priority ensures TX completes promptly
     BaseType_t result = xTaskCreatePinnedToCore(
         txTask,                 // Task function
@@ -281,7 +287,7 @@ static void initRS485Hardware() {
         NULL,                   // Parameters
         TX_TASK_PRIORITY,       // Priority (higher than loop)
         &txTaskHandle,          // Task handle
-        1                       // Core 1 (same as Arduino loop)
+        tskNO_AFFINITY          // Run on any available core (single or dual-core compatible)
     );
 
     if (result != pdPASS) {

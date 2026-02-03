@@ -1,10 +1,19 @@
 /**
  * =============================================================================
- * ESP32-S3 RS485 SLAVE - HARDWARE RS485 MODE IMPLEMENTATION
+ * ESP32 RS485 SLAVE - HARDWARE RS485 MODE IMPLEMENTATION
  * =============================================================================
  *
  * High-performance RS485 Slave for DCS-BIOS using the ESP32's NATIVE HARDWARE
  * RS485 mode for CYCLE-ACCURATE DE pin timing.
+ *
+ * SUPPORTED ESP32 VARIANTS:
+ * - ESP32 (Classic)    - Dual-core
+ * - ESP32-S2           - Single-core
+ * - ESP32-S3           - Dual-core
+ * - ESP32-C3           - Single-core RISC-V
+ * - ESP32-C6           - Single-core RISC-V
+ *
+ * All variants support UART_MODE_RS485_HALF_DUPLEX for hardware DE control.
  *
  * =============================================================================
  * CRITICAL HARDWARE FEATURE: UART_MODE_RS485_HALF_DUPLEX
@@ -50,13 +59,13 @@
  * in the UART's baud rate generator, which is unavoidable in any implementation.
  *
  * =============================================================================
- * HARDWARE CONFIGURATION
+ * HARDWARE CONFIGURATION (adjust pins for your board)
  * =============================================================================
  *
- * Device: ESP32-S3 (Waveshare ESP32-S3-RS485-CAN or compatible)
+ * Default pins are for Waveshare ESP32-S3-RS485-CAN:
  * TX Pin: GPIO 17 → RS485 DI (Driver Input)
  * RX Pin: GPIO 18 ← RS485 RO (Receiver Output)
- * DE Pin: GPIO 21 → RS485 DE + /RE (Direction Enable) [Hardware-controlled via RTS]
+ * DE Pin: GPIO 21 → RS485 DE + /RE (Hardware-controlled via RTS), or -1 for auto-dir
  * Speed:  250,000 bps (8N1)
  *
  * IMPORTANT: The DE pin is configured as the UART's RTS output. The hardware
@@ -113,9 +122,9 @@
 // COMPILE-TIME CHECKS
 // ============================================================================
 
-// #if !defined(CONFIG_IDF_TARGET_ESP32S3)
-    // #error "This implementation requires ESP32-S3. Please select the correct board."
-// #endif
+#if !defined(ESP32)
+    #error "This implementation requires an ESP32 variant (ESP32, S2, S3, C3, C6, etc.)"
+#endif
 
 #if SLAVE_ADDRESS < 1 || SLAVE_ADDRESS > 127
     #error "SLAVE_ADDRESS must be between 1 and 127"
