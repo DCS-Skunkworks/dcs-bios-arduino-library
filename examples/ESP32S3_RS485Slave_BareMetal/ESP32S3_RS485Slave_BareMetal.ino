@@ -101,7 +101,6 @@
 // Timing Constants
 #define SYNC_TIMEOUT_US     500     // 500µs silence = sync detected
 #define RX_TIMEOUT_SYMBOLS  12      // ~480µs at 250kbaud (12 symbol times)
-#define RX_FRAME_TIMEOUT_US 5000    // 5ms timeout to reset mid-frame RX
 
 // Defensive Options (matches AVR behavior for edge cases)
 #define ENABLE_RX_OVERFLOW_CHECK  0       // Set to 1 to enable overflow protection
@@ -689,7 +688,7 @@ static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
     uint8_t len = messageBuffer.getLength();
 
-    packet[0] = len;      // Length = data bytes only (NOT including msgtype)
+    packet[0] = len + 1;  // Length includes msgtype byte (per DCS-BIOS protocol)
     packet[1] = 0;        // Message type = 0 (DCS-BIOS data)
 
     for (uint8_t i = 0; i < len; i++) {
@@ -753,15 +752,6 @@ static void sendZeroLengthResponse() {
  */
 static void processRS485() {
     int64_t now = esp_timer_get_time();
-
-    // =========================================================================
-    // Frame Timeout Safety - Reset if stuck mid-frame for 5ms
-    // =========================================================================
-    // Matches AVR behavior: if we're in an intermediate state and haven't
-    // received data for 5ms, something went wrong - reset to SYNC
-    if (rs485State != STATE_SYNC && (now - lastRxTime) >= RX_FRAME_TIMEOUT_US) {
-        rs485State = STATE_SYNC;
-    }
 
     // =========================================================================
     // Sync Detection - 500µs of bus silence
