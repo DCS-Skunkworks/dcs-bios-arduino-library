@@ -101,7 +101,7 @@
 // Timing Constants
 #define SYNC_TIMEOUT_US     500     // 500µs silence = sync detected
 #define RX_TIMEOUT_SYMBOLS  12      // ~480µs at 250kbaud (12 symbol times)
-#define RX_FRAME_TIMEOUT_US 5000    // 5ms timeout to reset if stuck mid-frame
+#define RX_FRAME_TIMEOUT_US 500000   // 500ms timeout to reset if stuck mid-frame
 
 // Defensive Options (matches AVR behavior for edge cases)
 #define ENABLE_RX_OVERFLOW_CHECK  0       // Set to 1 to enable overflow protection
