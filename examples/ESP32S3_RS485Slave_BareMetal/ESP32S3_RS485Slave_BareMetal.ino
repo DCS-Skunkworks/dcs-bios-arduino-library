@@ -77,7 +77,7 @@
 // Pin Configuration (Waveshare ESP32-S3-RS485-CAN defaults)
 #define RS485_TX_PIN    17
 #define RS485_RX_PIN    18
-#define RS485_DE_PIN    21    // Set to -1 for auto-direction transceivers (no DE pin needed)
+#define RS485_DE_PIN    -1    // Set to -1 for auto-direction transceivers (no DE pin needed)
                               // Set to GPIO number for hardware DE control (e.g., 21)
 
 // UART Configuration
@@ -92,6 +92,7 @@
 // Timing Constants
 #define SYNC_TIMEOUT_US     500     // 500µs silence = sync detected
 #define RX_TIMEOUT_SYMBOLS  12      // ~480µs at 250kbaud (12 symbol times)
+#define RX_FRAME_TIMEOUT_US 5000    // 5ms timeout to reset mid-frame RX
 
 // ============================================================================
 // ESP32 HARDWARE INCLUDES
@@ -108,9 +109,9 @@
 // COMPILE-TIME CHECKS
 // ============================================================================
 
-#if !defined(CONFIG_IDF_TARGET_ESP32S3)
-    #error "This implementation requires ESP32-S3. Please select the correct board."
-#endif
+// #if !defined(CONFIG_IDF_TARGET_ESP32S3)
+    // #error "This implementation requires ESP32-S3. Please select the correct board."
+// #endif
 
 #if SLAVE_ADDRESS < 1 || SLAVE_ADDRESS > 127
     #error "SLAVE_ADDRESS must be between 1 and 127"
@@ -737,6 +738,15 @@ static void processRS485() {
     int64_t now = esp_timer_get_time();
 
     // =========================================================================
+    // Frame Timeout Safety - Reset if stuck mid-frame for 5ms
+    // =========================================================================
+    // Matches AVR behavior: if we're in an intermediate state and haven't
+    // received data for 5ms, something went wrong - reset to SYNC
+    if (rs485State != STATE_SYNC && (now - lastRxTime) >= RX_FRAME_TIMEOUT_US) {
+        rs485State = STATE_SYNC;
+    }
+
+    // =========================================================================
     // Sync Detection - 500µs of bus silence
     // =========================================================================
     if (rs485State == STATE_SYNC) {
@@ -916,9 +926,9 @@ public:
 // Choose GPIO pins that don't conflict with RS485 (17, 18, 21) or USB (19, 20)
 // Set any pin to -1 to disable that test control
 
-#define SWITCH_PIN      4     // Test switch input (toggle switch), -1 to disable
-#define BUTTON_PIN      6     // Test button input (momentary pushbutton), -1 to disable
-#define MC_READY_PIN    5     // Test LED output, -1 to disable
+#define SWITCH_PIN      -1     // Test switch input (toggle switch), -1 to disable
+#define BUTTON_PIN      0      // Test button input (momentary pushbutton), -1 to disable
+#define MC_READY_PIN    15     // Test LED output, -1 to disable
 
 // ============================================================================
 // DCS-BIOS INPUTS (Physical controls -> Sim)
