@@ -101,9 +101,8 @@
 // Timing Constants
 #define SYNC_TIMEOUT_US     500     // 500µs silence = sync detected
 #define RX_TIMEOUT_SYMBOLS  12      // ~480µs at 250kbaud (12 symbol times)
-#define RX_FRAME_TIMEOUT_US 500000   // 500ms timeout to reset if stuck mid-frame
 
-// Defensive Options (matches AVR behavior for edge cases)
+// Defensive Options (AVR doesn't have frame timeout - we match that behavior)
 #define ENABLE_RX_OVERFLOW_CHECK  0       // Set to 1 to enable overflow protection
 #define MAX_RX_FRAME_BYTES        256     // Max bytes per frame before forced SYNC reset
 
@@ -762,19 +761,10 @@ static void processRS485() {
     int64_t now = esp_timer_get_time();
 
     // =========================================================================
-    // Frame Timeout Safety - Reset ONLY if stuck MID-FRAME
+    // Sync Detection - 500µs of bus silence (matches AVR behavior exactly)
     // =========================================================================
-    // Only reset if we're in a state where we've received PART of a frame
-    // but not the rest. STATE_RX_WAIT_ADDRESS is normal idle - don't reset that!
-    if (rs485State != STATE_SYNC &&
-        rs485State != STATE_RX_WAIT_ADDRESS &&
-        (now - lastRxTime) >= RX_FRAME_TIMEOUT_US) {
-        rs485State = STATE_SYNC;
-    }
-
-    // =========================================================================
-    // Sync Detection - 500µs of bus silence
-    // =========================================================================
+    // Note: AVR Slave has NO frame timeout recovery. It trusts the protocol.
+    // We match that behavior for full compatibility.
     if (rs485State == STATE_SYNC) {
         if ((now - lastRxTime) >= SYNC_TIMEOUT_US) {
 #if ENABLE_RX_OVERFLOW_CHECK
