@@ -77,7 +77,8 @@
 // Pin Configuration (Waveshare ESP32-S3-RS485-CAN defaults)
 #define RS485_TX_PIN    17
 #define RS485_RX_PIN    18
-#define RS485_DE_PIN    21    // Connected to UART RTS for hardware control
+#define RS485_DE_PIN    21    // Set to -1 for auto-direction transceivers (no DE pin needed)
+                              // Set to GPIO number for hardware DE control (e.g., 21)
 
 // UART Configuration
 #define RS485_UART_NUM  1        // UART1 (UART0 is typically used for USB/debug)
@@ -588,39 +589,50 @@ static void initRS485Hardware() {
                                          UART_TX_BUFFER_SIZE, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(uartNum, &uart_config));
 
+#if RS485_DE_PIN >= 0
     // =========================================================================
-    // PIN CONFIGURATION - Critical: RTS is used as DE!
+    // MODE 1: Hardware DE Control (RS485_DE_PIN is a valid GPIO)
     // =========================================================================
-    // TX  → GPIO 17 → RS485 DI
-    // RX  ← GPIO 18 ← RS485 RO
-    // RTS → GPIO 21 → RS485 DE (Hardware-controlled!)
-    // CTS → Not used
+    // TX  → RS485 DI
+    // RX  ← RS485 RO
+    // RTS → RS485 DE (Hardware-controlled by UART peripheral)
+    //
+    // The ESP32 UART's RS485 mode automatically:
+    // - Asserts DE when TX FIFO has data (<12.5ns latency)
+    // - Deasserts DE when last stop bit transmitted (~0ns jitter)
+    // =========================================================================
     ESP_ERROR_CHECK(uart_set_pin(uartNum,
                                   RS485_TX_PIN,      // TX
                                   RS485_RX_PIN,      // RX
-                                  RS485_DE_PIN,      // RTS → used as DE!
+                                  RS485_DE_PIN,      // RTS → used as DE
                                   UART_PIN_NO_CHANGE // CTS not used
                                   ));
 
-    // =========================================================================
-    // ENABLE HARDWARE RS485 MODE - This is the magic!
-    // =========================================================================
-    /**
-     * UART_MODE_RS485_HALF_DUPLEX enables:
-     *
-     * 1. Automatic RTS/DE assertion when TX FIFO has data
-     * 2. Automatic RTS/DE deassertion when TX shift register empties
-     * 3. RX disabled during TX (prevents echo/collision detection)
-     *
-     * Register-level effects (for reference):
-     *   UART_RS485_CONF_REG:
-     *     - UART_RS485_EN = 1         (Enable RS485 mode)
-     *     - UART_RS485TX_RX_EN = 1    (Enable automatic TX/RX switching)
-     *     - UART_RS485RXBY_TX_EN = 1  (Disable RX during TX)
-     *     - UART_DL0_EN = 0           (No delay before TX)
-     *     - UART_DL1_EN = 0           (No delay after TX)
-     */
+    // Enable hardware RS485 mode with automatic DE control
     ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX));
+
+#else
+    // =========================================================================
+    // MODE 2: Auto-Direction Transceiver (RS485_DE_PIN = -1)
+    // =========================================================================
+    // TX  → RS485 DI
+    // RX  ← RS485 RO
+    // DE  → Controlled by transceiver (e.g., MAX13487E, MAX3485 with auto-dir)
+    //
+    // The transceiver automatically detects TX activity and switches direction.
+    // No DE pin control needed from the MCU - just regular UART mode.
+    // =========================================================================
+    ESP_ERROR_CHECK(uart_set_pin(uartNum,
+                                  RS485_TX_PIN,      // TX
+                                  RS485_RX_PIN,      // RX
+                                  UART_PIN_NO_CHANGE,// No RTS/DE needed
+                                  UART_PIN_NO_CHANGE // No CTS needed
+                                  ));
+
+    // Use regular UART mode - transceiver handles direction switching
+    ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_UART));
+
+#endif
 
     // =========================================================================
     // RX TIMEOUT CONFIGURATION
@@ -636,12 +648,6 @@ static void initRS485Hardware() {
     // Initialize state
     rs485State = STATE_SYNC;
     lastRxTime = esp_timer_get_time();
-
-    // Log configuration (optional - remove in production)
-    // Serial.printf("RS485 Hardware Mode initialized on UART%d\n", RS485_UART_NUM);
-    // Serial.printf("  TX: GPIO%d, RX: GPIO%d, DE(RTS): GPIO%d\n",
-    //               RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN);
-    // Serial.printf("  Baud: %d, Mode: UART_MODE_RS485_HALF_DUPLEX\n", RS485_BAUD_RATE);
 }
 
 // ============================================================================
