@@ -708,8 +708,7 @@ static void sendResponse() {
     // This ensures the hardware has finished transmitting
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
 
-    // Reset lastRxTime after TX to prevent spurious frame timeouts
-    // (TX blocking can take several ms, making lastRxTime stale)
+    // Reset timing reference after TX
     lastRxTime = esp_timer_get_time();
 
     // Clear message buffer
@@ -730,7 +729,7 @@ static void sendZeroLengthResponse() {
     uart_write_bytes(uartNum, (const char*)&response, 1);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
 
-    // Reset lastRxTime after TX to prevent spurious frame timeouts
+    // Reset timing reference after TX
     lastRxTime = esp_timer_get_time();
 
     rs485State = STATE_RX_WAIT_ADDRESS;
