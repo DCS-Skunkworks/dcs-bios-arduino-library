@@ -905,14 +905,30 @@ public:
 };
 
 // ============================================================================
-// DEMO CONTROLS - Customize for your cockpit!
+// TEST PINS - Directly usable for testing on Waveshare ESP32-S3-RS485-CAN
+// ============================================================================
+// Choose GPIO pins that don't conflict with RS485 (17, 18, 21) or USB (19, 20)
+
+#define SWITCH_PIN      4     // Test switch input (directly usable GPIO)
+#define MC_READY_PIN    5     // Test LED output (directly usable GPIO)
+
+// ============================================================================
+// DCS-BIOS INPUTS (Physical controls -> Sim)
 // ============================================================================
 
-// Example: Master Caution light
-// LED masterCaution(0x7408, 0x0800, 2);  // F/A-18C Master Caution
+// F/A-18C Master Arm Switch - directly usable test input
+// Connect a momentary button between SWITCH_PIN and GND
+// Internal pullup enabled, so pressing button sends "1", releasing sends "0"
+Switch2Pos masterArmSw("MASTER_ARM_SW", SWITCH_PIN);
 
-// Example: Button
-// Switch2Pos ufcButton("UFC_1", 4);
+// ============================================================================
+// DCS-BIOS OUTPUTS (Sim state -> LEDs)
+// ============================================================================
+
+// F/A-18C Master Caution READY Light (yellow)
+// Address: 0x740C (29708), Mask: 0x8000 (32768)
+// Connect an LED (with resistor) between MC_READY_PIN and GND
+LED mcReadyLed(0x740C, 0x8000, MC_READY_PIN);
 
 // ============================================================================
 // ARDUINO SETUP AND LOOP
