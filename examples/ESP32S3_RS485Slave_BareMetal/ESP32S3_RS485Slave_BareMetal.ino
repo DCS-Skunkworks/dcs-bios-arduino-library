@@ -755,11 +755,13 @@ static void processRS485() {
     int64_t now = esp_timer_get_time();
 
     // =========================================================================
-    // Frame Timeout Safety - Reset if stuck mid-frame for 5ms
+    // Frame Timeout Safety - Reset ONLY if stuck MID-FRAME
     // =========================================================================
-    // If we're in an intermediate state and haven't received data for 5ms,
-    // something went wrong - reset to SYNC to recover
-    if (rs485State != STATE_SYNC && (now - lastRxTime) >= RX_FRAME_TIMEOUT_US) {
+    // Only reset if we're in a state where we've received PART of a frame
+    // but not the rest. STATE_RX_WAIT_ADDRESS is normal idle - don't reset that!
+    if (rs485State != STATE_SYNC &&
+        rs485State != STATE_RX_WAIT_ADDRESS &&
+        (now - lastRxTime) >= RX_FRAME_TIMEOUT_US) {
         rs485State = STATE_SYNC;
     }
 
