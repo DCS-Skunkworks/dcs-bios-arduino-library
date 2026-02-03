@@ -915,17 +915,23 @@ public:
 // ============================================================================
 // Choose GPIO pins that don't conflict with RS485 (17, 18, 21) or USB (19, 20)
 
-#define SWITCH_PIN      4     // Test switch input (directly usable GPIO)
+#define SWITCH_PIN      4     // Test switch input (toggle switch)
+#define BUTTON_PIN      6     // Test button input (momentary pushbutton)
 #define MC_READY_PIN    5     // Test LED output (directly usable GPIO)
 
 // ============================================================================
 // DCS-BIOS INPUTS (Physical controls -> Sim)
 // ============================================================================
 
-// F/A-18C Master Arm Switch - directly usable test input
-// Connect a momentary button between SWITCH_PIN and GND
-// Internal pullup enabled, so pressing button sends "1", releasing sends "0"
+// F/A-18C Master Arm Switch - toggle switch test
+// Connect a toggle switch between SWITCH_PIN and GND
+// Internal pullup enabled: switch ON (to GND) = "1", switch OFF = "0"
 Switch2Pos masterArmSw("MASTER_ARM_SW", SWITCH_PIN);
+
+// F/A-18C UFC Option Select 1 - momentary pushbutton test
+// Connect a momentary button between BUTTON_PIN and GND
+// Internal pullup enabled: press = "1", release = "0"
+Switch2Pos ufcOpt1Btn("UFC_OS1", BUTTON_PIN);
 
 // ============================================================================
 // DCS-BIOS OUTPUTS (Sim state -> LEDs)
