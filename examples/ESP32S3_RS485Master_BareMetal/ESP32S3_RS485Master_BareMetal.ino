@@ -104,9 +104,11 @@
 // This sends debug data via UDP without affecting RS485 timing.
 // Useful for debugging when USB Serial would add latency.
 
+// UDP DEBUG - Uses CockpitOS debug console on port 4210
 #define UDP_DEBUG_ENABLE    0       // Set to 1 to enable UDP debug
-#define UDP_DEBUG_IP        "192.168.1.255"  // Broadcast or specific IP
-#define UDP_DEBUG_PORT      5555
+#define UDP_DEBUG_IP        "255.255.255.255"  // Broadcast to all
+#define UDP_DEBUG_PORT      4210    // CockpitOS debug port
+#define UDP_DEBUG_NAME      "RS485-MASTER"    // Device identifier in debug messages
 #define WIFI_SSID           "YourWiFiSSID"
 #define WIFI_PASSWORD       "YourWiFiPassword"
 
@@ -162,11 +164,13 @@ private:
     IPAddress targetIP;
     bool connected;
     char buffer[256];
+    unsigned long lastStatusTime;
 
 public:
-    UdpDebug() : connected(false) {}
+    UdpDebug() : connected(false), lastStatusTime(0) {}
 
     void begin() {
+        WiFi.mode(WIFI_STA);
         WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         // Don't wait for connection - will check later
         targetIP.fromString(UDP_DEBUG_IP);
@@ -176,16 +180,26 @@ public:
     void checkConnection() {
         if (!connected && WiFi.status() == WL_CONNECTED) {
             connected = true;
-            send("UDP Debug connected, IP: %s", WiFi.localIP().toString().c_str());
+            // Send registration/announcement packet
+            send("=== %s ONLINE === IP: %s", UDP_DEBUG_NAME, WiFi.localIP().toString().c_str());
+            lastStatusTime = millis();
+        }
+        // Periodic heartbeat every 30 seconds to show we're still alive
+        if (connected && (millis() - lastStatusTime) > 30000) {
+            send("[%s] heartbeat", UDP_DEBUG_NAME);
+            lastStatusTime = millis();
         }
     }
 
     void send(const char* fmt, ...) {
         if (!connected) return;
 
+        // Prefix with device name for easy identification
+        int pos = snprintf(buffer, sizeof(buffer), "[%s] ", UDP_DEBUG_NAME);
+
         va_list args;
         va_start(args, fmt);
-        vsnprintf(buffer, sizeof(buffer), fmt, args);
+        vsnprintf(buffer + pos, sizeof(buffer) - pos, fmt, args);
         va_end(args);
 
         // Non-blocking UDP send
@@ -197,7 +211,7 @@ public:
     void sendHex(const char* prefix, uint8_t* data, size_t len) {
         if (!connected) return;
 
-        int pos = snprintf(buffer, sizeof(buffer), "%s: ", prefix);
+        int pos = snprintf(buffer, sizeof(buffer), "[%s] %s: ", UDP_DEBUG_NAME, prefix);
         for (size_t i = 0; i < len && pos < (int)sizeof(buffer) - 4; i++) {
             pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%02X ", data[i]);
         }
@@ -481,6 +495,7 @@ public:
                 if (!txBusy) {
                     rxStartTime = esp_timer_get_time();
                     state = STATE_RX_WAIT_DATALENGTH;
+                    UDP_DBG("POLL_SENT addr=%d waiting for response...", currentPollAddress);
                 }
                 break;
 
@@ -625,6 +640,9 @@ static void txTask(void* param) {
             // Send on the specified UART
             uart_write_bytes(request.uartNum, (const char*)request.data, request.length);
             uart_wait_tx_done(request.uartNum, pdMS_TO_TICKS(50));
+
+            // Flush any echo bytes (RS485 half-duplex may echo our TX back to RX)
+            uart_flush_input(request.uartNum);
 
             // Find the bus that owns this UART and clear its txBusy flag
             RS485Master* bus = RS485Master::first;
