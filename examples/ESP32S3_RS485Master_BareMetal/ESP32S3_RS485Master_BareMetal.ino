@@ -536,11 +536,6 @@ static void txTask(void* param) {
             uart_write_bytes(request.uartNum, (const char*)request.data, request.length);
             uart_wait_tx_done(request.uartNum, pdMS_TO_TICKS(50));
 
-            // Critical: Flush RX buffer after TX
-            // Some ESP32 variants (especially S2) may echo TX data into RX buffer
-            // in RS485 half-duplex mode. Clear it before listening for response.
-            uart_flush_input(request.uartNum);
-
             // Find the bus that owns this UART and clear its txBusy flag
             RS485Master* bus = RS485Master::first;
             while (bus != nullptr) {
