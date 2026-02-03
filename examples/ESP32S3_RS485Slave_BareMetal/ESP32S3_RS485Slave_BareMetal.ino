@@ -528,7 +528,10 @@ static ProtocolParser parser;
 static RingBuffer<MESSAGE_BUFFER_SIZE> messageBuffer;
 
 bool tryToSendDcsBiosMessage(const char* msg, const char* arg) {
-    if (messageBuffer.complete) return false;
+    if (messageBuffer.complete) {
+        DBGF("[MSG BLOCKED: buffer busy] %s %s\n", msg, arg);
+        return false;
+    }
 
     messageBuffer.clear();
 
@@ -548,6 +551,7 @@ bool tryToSendDcsBiosMessage(const char* msg, const char* arg) {
     messageBuffer.complete = true;
     PollingInput::setMessageSentOrQueued();
 
+    DBGF("[MSG QUEUED: %s %s] len=%d\n", msg, arg, messageBuffer.getLength());
     return true;
 }
 
@@ -733,6 +737,13 @@ static void sendResponse() {
 
     size_t totalBytes = 3 + len;
 
+    // DEBUG: Show exactly what we're sending
+    DBGF("[TX SEND len=%d total=%d data=", len, totalBytes);
+    for (size_t i = 0; i < totalBytes && i < 20; i++) {
+        DBGF("%02X ", packet[i]);
+    }
+    DBGLN("]");
+
     // =========================================================================
     // HARDWARE RS485 MAGIC HAPPENS HERE
     // =========================================================================
@@ -749,10 +760,16 @@ static void sendResponse() {
 
     // Wait for TX to complete before returning to RX state
     // This ensures the hardware has finished transmitting
-    ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
+    esp_err_t txResult = uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+    DBGF("[TX DONE result=%d]\n", txResult);
 
     // CRITICAL: Flush any echo bytes that may have been received during TX
     // Even with hardware RS485 mode, transceiver settling can cause brief echoes
+    size_t echoBytes = 0;
+    uart_get_buffered_data_len(uartNum, &echoBytes);
+    if (echoBytes > 0) {
+        DBGF("[TX ECHO flushing %d bytes]\n", echoBytes);
+    }
     uart_flush_input(uartNum);
 
     // Reset timing reference after TX
@@ -764,6 +781,7 @@ static void sendResponse() {
 
     // Return to RX state
     rs485State = STATE_RX_WAIT_ADDRESS;
+    DBGLN("[TX COMPLETE->RX]");
 }
 
 /**
@@ -774,9 +792,14 @@ static void sendZeroLengthResponse() {
 
     // Hardware handles DE automatically
     uart_write_bytes(uartNum, (const char*)&response, 1);
-    ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
+    esp_err_t txResult = uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
 
-    // CRITICAL: Flush any echo bytes that may have been received during TX
+    // Check for echo (indicates DE timing issue)
+    size_t echoBytes = 0;
+    uart_get_buffered_data_len(uartNum, &echoBytes);
+    if (echoBytes > 0) {
+        DBGF("[TX0 ECHO! %d bytes - DE issue?]\n", echoBytes);
+    }
     uart_flush_input(uartNum);
 
     // Reset timing reference after TX
@@ -1083,7 +1106,7 @@ public:
 
 #define SWITCH_PIN      -1     // Test switch input (toggle switch), -1 to disable
 #define BUTTON_PIN      0      // Test button input (momentary pushbutton), -1 to disable
-#define MC_READY_PIN    15     // Test LED output, -1 to disable
+#define MC_READY_PIN    -1     // Test LED output, -1 to disable
 
 // ============================================================================
 // DCS-BIOS INPUTS (Physical controls -> Sim)
