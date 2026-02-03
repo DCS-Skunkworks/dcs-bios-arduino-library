@@ -914,33 +914,40 @@ public:
 // TEST PINS - Directly usable for testing on Waveshare ESP32-S3-RS485-CAN
 // ============================================================================
 // Choose GPIO pins that don't conflict with RS485 (17, 18, 21) or USB (19, 20)
+// Set any pin to -1 to disable that test control
 
-#define SWITCH_PIN      4     // Test switch input (toggle switch)
-#define BUTTON_PIN      6     // Test button input (momentary pushbutton)
-#define MC_READY_PIN    5     // Test LED output (directly usable GPIO)
+#define SWITCH_PIN      4     // Test switch input (toggle switch), -1 to disable
+#define BUTTON_PIN      6     // Test button input (momentary pushbutton), -1 to disable
+#define MC_READY_PIN    5     // Test LED output, -1 to disable
 
 // ============================================================================
 // DCS-BIOS INPUTS (Physical controls -> Sim)
 // ============================================================================
 
+#if SWITCH_PIN >= 0
 // F/A-18C Master Arm Switch - toggle switch test
 // Connect a toggle switch between SWITCH_PIN and GND
 // Internal pullup enabled: switch ON (to GND) = "1", switch OFF = "0"
 Switch2Pos masterArmSw("MASTER_ARM_SW", SWITCH_PIN);
+#endif
 
+#if BUTTON_PIN >= 0
 // F/A-18C UFC Option Select 1 - momentary pushbutton test
 // Connect a momentary button between BUTTON_PIN and GND
 // Internal pullup enabled: press = "1", release = "0"
 Switch2Pos ufcOpt1Btn("UFC_OS1", BUTTON_PIN);
+#endif
 
 // ============================================================================
 // DCS-BIOS OUTPUTS (Sim state -> LEDs)
 // ============================================================================
 
+#if MC_READY_PIN >= 0
 // F/A-18C Master Caution READY Light (yellow)
 // Address: 0x740C (29708), Mask: 0x8000 (32768)
 // Connect an LED (with resistor) between MC_READY_PIN and GND
 LED mcReadyLed(0x740C, 0x8000, MC_READY_PIN);
+#endif
 
 // ============================================================================
 // ARDUINO SETUP AND LOOP
