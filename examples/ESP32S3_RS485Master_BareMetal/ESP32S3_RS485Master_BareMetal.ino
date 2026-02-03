@@ -518,10 +518,7 @@ public:
 
             case STATE_RX_WAIT_DATALENGTH:
                 if ((now - rxStartTime) > POLL_TIMEOUT_US) {
-                    // Only log if a known slave went offline (not during normal scanning)
-                    if (slavePresent[currentPollAddress]) {
-                        UDP_DBG("SLAVE_OFFLINE addr=%d", currentPollAddress);
-                    }
+                    // Don't log normal timeouts - too spammy
                     slavePresent[currentPollAddress] = false;
                     sendTimeoutZeroByte();
                     return;
@@ -533,14 +530,10 @@ public:
                         uint8_t c;
                         uart_read_bytes(uartNum, &c, 1, 0);
                         rxtxLen = c;
-                        // Log new slave discovery or actual data
-                        if (!slavePresent[currentPollAddress]) {
-                            UDP_DBG("SLAVE_FOUND addr=%d len=%d", currentPollAddress, rxtxLen);
-                        } else if (rxtxLen > 0) {
-                            UDP_DBG("RX addr=%d len=%d", currentPollAddress, rxtxLen);
-                        }
                         slavePresent[currentPollAddress] = true;
+                        // Only log when slave has actual data to send
                         if (rxtxLen > 0) {
+                            UDP_DBG("RX_START addr=%d len=%d", currentPollAddress, rxtxLen);
                             state = STATE_RX_WAIT_MSGTYPE;
                             rxStartTime = now;
                         } else {
@@ -658,8 +651,8 @@ static void txTask(void* param) {
             uart_write_bytes(request.uartNum, (const char*)request.data, request.length);
             uart_wait_tx_done(request.uartNum, pdMS_TO_TICKS(50));
 
-            // Flush any echo bytes (RS485 half-duplex may echo our TX back to RX)
-            uart_flush_input(request.uartNum);
+            // NOTE: Don't flush here - ESP32 RS485 half-duplex mode disables RX during TX
+            // Flushing here could remove the slave's response if timing is tight
 
             // Find the bus that owns this UART and clear its txBusy flag
             RS485Master* bus = RS485Master::first;
