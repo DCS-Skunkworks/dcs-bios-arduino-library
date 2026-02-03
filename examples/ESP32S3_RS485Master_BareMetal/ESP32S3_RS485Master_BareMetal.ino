@@ -33,8 +33,9 @@
  *   Requests slave to send any pending data
  *
  * SLAVE RESPONSE:
- *   [Length] [MsgType] [Data...] [Checksum]  - if slave has data
- *   [0x00]                                    - if slave has nothing
+ *   [DataLength] [MsgType] [Data...] [Checksum]  - if slave has data
+ *   [0x00]                                        - if slave has nothing
+ *   Note: DataLength = number of DATA bytes only, NOT including MsgType
  *
  * TIMEOUT HANDLING:
  *   - 1ms: If no response, mark slave as not present
@@ -582,7 +583,7 @@ static void processMaster() {
                     uint8_t c;
                     uart_read_bytes(uartNum, &c, 1, 0);
                     rxMsgType = c;
-                    rxtxLen--;  // Length includes msgtype
+                    // Note: rxtxLen NOT decremented - length is DATA bytes only, not including msgtype
                     masterState = STATE_RX_WAIT_DATA;
                 }
             }
