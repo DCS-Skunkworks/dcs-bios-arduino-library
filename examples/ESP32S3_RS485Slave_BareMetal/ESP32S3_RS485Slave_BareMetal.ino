@@ -101,6 +101,10 @@
 // Timing Constants
 #define SYNC_TIMEOUT_US     500     // 500µs silence = sync detected
 #define RX_TIMEOUT_SYMBOLS  12      // ~480µs at 250kbaud (12 symbol times)
+#define FRAME_TIMEOUT_US    50000   // 50ms max time to complete a frame (configurable)
+
+// Protocol Limits (matches AVR buffer sizes for compatibility)
+#define MAX_FRAME_DATA_SIZE 128     // Maximum data bytes in a single frame
 
 // ============================================================================
 // DEBUG MODE - Set to 1 to enable diagnostic output via USB Serial
@@ -576,6 +580,7 @@ static volatile uint8_t rxMsgType = 0;
 static volatile uint8_t rxtxLen = 0;
 static volatile RxDataType rxDataType = RXDATA_IGNORE;
 static volatile int64_t lastRxTime = 0;
+static volatile int64_t frameStartTime = 0;  // Timestamp when current frame started
 static uart_port_t uartNum = (uart_port_t)RS485_UART_NUM;
 
 // Debug counters for periodic status report
@@ -798,10 +803,30 @@ static void processRS485() {
     // =========================================================================
     // Sync Detection - 500µs of bus silence (matches AVR behavior exactly)
     // =========================================================================
+    // NOTE: When NO bytes are pending, we check for silence here.
+    // When bytes ARE pending, the SYNC state handler below uses the
+    // silence-breaking byte as the first protocol byte (AVR fall-through behavior).
     if (rs485State == STATE_SYNC) {
         if ((now - lastRxTime) >= SYNC_TIMEOUT_US) {
             rs485State = STATE_RX_WAIT_ADDRESS;
             DBGVLN("[SYNC->RDY]");  // Sync complete, ready to receive
+        }
+    }
+
+    // =========================================================================
+    // Frame Timeout Protection - Prevents stuck state if frame never completes
+    // =========================================================================
+    // If we're in the middle of receiving a frame and no data arrives for too
+    // long, something went wrong (master reset, bus error, etc.). Resync.
+    // This is a robustness enhancement beyond AVR behavior.
+    if (rs485State != STATE_SYNC && rs485State != STATE_RX_WAIT_ADDRESS) {
+        if ((now - lastRxTime) >= FRAME_TIMEOUT_US) {
+            DBGLN("[FRAME TIMEOUT->SYNC]");
+#if DEBUG_MODE
+            dbgErrCount++;
+#endif
+            rs485State = STATE_SYNC;
+            lastRxTime = now;  // Reset sync timing
         }
     }
 
@@ -828,17 +853,45 @@ static void processRS485() {
         if (uart_read_bytes(uartNum, &c, 1, 0) != 1) break;
         available--;
 
+        // =====================================================================
+        // SYNC STATE HANDLING - AVR Fall-Through Behavior
+        // =====================================================================
+        // The AVR uses a clever fall-through: when in SYNC and enough silence
+        // has passed, it does NOT break but falls through to RX_WAIT_ADDRESS,
+        // using the SAME byte as the address. We replicate this exactly.
+        //
+        // CRITICAL: Check time gap BEFORE updating lastRxTime!
+        // =====================================================================
+        if (rs485State == STATE_SYNC) {
+            if ((now - lastRxTime) >= SYNC_TIMEOUT_US) {
+                // Sync complete! This byte is the first protocol byte (address).
+                // Fall through to address processing (no break, like AVR).
+                DBGVLN("[SYNC->ADDR]");
+                rxSlaveAddress = c;
+                rs485State = STATE_RX_WAIT_MSGTYPE;
+                lastRxTime = now;
+                frameStartTime = now;  // Start frame timeout tracking
+                continue;
+            } else {
+                // Not enough silence yet - stay in sync, update timing
+                DBGVF("[SYNC:0x%02X]\n", c);
+                lastRxTime = now;
+                continue;
+            }
+        }
+
+        // For all non-SYNC states, update lastRxTime
         lastRxTime = now;
 
         switch (rs485State) {
             case STATE_SYNC:
-                // Byte received during sync - stay in sync, wait for silence
-                DBGVF("[SYNC:0x%02X]\n", c);
+                // Should never reach here - handled above
                 break;
 
             case STATE_RX_WAIT_ADDRESS:
                 rxSlaveAddress = c;
                 rs485State = STATE_RX_WAIT_MSGTYPE;
+                frameStartTime = now;  // Start frame timeout tracking
                 break;
 
             case STATE_RX_WAIT_MSGTYPE:
@@ -850,6 +903,17 @@ static void processRS485() {
                 rxtxLen = c;
                 // Log every frame header: [addr][msgtype][len]
                 DBGVF("[FRM a=%d m=%d l=%d]\n", rxSlaveAddress, rxMsgType, rxtxLen);
+
+                // Protocol sanity check: data length must be reasonable
+                // (matches AVR buffer overflow protection behavior)
+                if (rxtxLen > MAX_FRAME_DATA_SIZE) {
+                    DBGF("[ERR len=%d > max]\n", rxtxLen);
+#if DEBUG_MODE
+                    dbgErrCount++;
+#endif
+                    rs485State = STATE_SYNC;
+                    break;
+                }
 
                 if (rxtxLen == 0) {
                     goto handle_message_complete;
