@@ -495,7 +495,7 @@ public:
                 if (!txBusy) {
                     rxStartTime = esp_timer_get_time();
                     state = STATE_RX_WAIT_DATALENGTH;
-                    UDP_DBG("POLL_SENT addr=%d waiting for response...", currentPollAddress);
+                    // Don't log every poll - too spammy during scanning
                 }
                 break;
 
@@ -507,9 +507,12 @@ public:
 
             case STATE_RX_WAIT_DATALENGTH:
                 if ((now - rxStartTime) > POLL_TIMEOUT_US) {
+                    // Only log if a known slave went offline (not during normal scanning)
+                    if (slavePresent[currentPollAddress]) {
+                        UDP_DBG("SLAVE_OFFLINE addr=%d", currentPollAddress);
+                    }
                     slavePresent[currentPollAddress] = false;
                     sendTimeoutZeroByte();
-                    UDP_DBG("POLL_TIMEOUT addr=%d", currentPollAddress);
                     return;
                 }
                 {
@@ -519,7 +522,12 @@ public:
                         uint8_t c;
                         uart_read_bytes(uartNum, &c, 1, 0);
                         rxtxLen = c;
-                        UDP_DBG("RX_LEN addr=%d len=%d", currentPollAddress, rxtxLen);
+                        // Log new slave discovery or actual data
+                        if (!slavePresent[currentPollAddress]) {
+                            UDP_DBG("SLAVE_FOUND addr=%d len=%d", currentPollAddress, rxtxLen);
+                        } else if (rxtxLen > 0) {
+                            UDP_DBG("RX addr=%d len=%d", currentPollAddress, rxtxLen);
+                        }
                         slavePresent[currentPollAddress] = true;
                         if (rxtxLen > 0) {
                             state = STATE_RX_WAIT_MSGTYPE;
@@ -533,7 +541,7 @@ public:
 
             case STATE_RX_WAIT_MSGTYPE:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
-                    UDP_DBG("RX_TIMEOUT_MSGTYPE addr=%d waited=%lld", currentPollAddress, now - rxStartTime);
+                    UDP_DBG("RX_ERR addr=%d timeout waiting for msgtype", currentPollAddress);
                     messageBuffer.clear();
                     messageBuffer.put('\n');
                     messageBuffer.complete = true;
@@ -547,7 +555,6 @@ public:
                         uint8_t c;
                         uart_read_bytes(uartNum, &c, 1, 0);
                         rxMsgType = c;
-                        UDP_DBG("RX_MSGTYPE addr=%d msgtype=%d", currentPollAddress, rxMsgType);
                         state = STATE_RX_WAIT_DATA;
                     }
                 }
@@ -555,7 +562,7 @@ public:
 
             case STATE_RX_WAIT_DATA:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
-                    UDP_DBG("RX_TIMEOUT_DATA addr=%d remaining=%d", currentPollAddress, rxtxLen);
+                    UDP_DBG("RX_ERR addr=%d timeout waiting for data, remaining=%d", currentPollAddress, rxtxLen);
                     messageBuffer.clear();
                     messageBuffer.put('\n');
                     messageBuffer.complete = true;
@@ -573,7 +580,6 @@ public:
                         available--;
                     }
                     if (rxtxLen == 0) {
-                        UDP_DBG("RX_DATA_COMPLETE addr=%d buflen=%d", currentPollAddress, messageBuffer.getLength());
                         state = STATE_RX_WAIT_CHECKSUM;
                     }
                 }
@@ -581,7 +587,7 @@ public:
 
             case STATE_RX_WAIT_CHECKSUM:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
-                    UDP_DBG("RX_TIMEOUT_CHECKSUM addr=%d", currentPollAddress);
+                    UDP_DBG("RX_ERR addr=%d timeout waiting for checksum", currentPollAddress);
                     messageBuffer.clear();
                     messageBuffer.put('\n');
                     messageBuffer.complete = true;
@@ -595,7 +601,7 @@ public:
                         uint8_t c;
                         uart_read_bytes(uartNum, &c, 1, 0);
                         (void)c;  // Checksum ignored (like AVR)
-                        UDP_DBG("RX_COMPLETE addr=%d len=%d", currentPollAddress, messageBuffer.getLength());
+                        UDP_DBG("RX_OK addr=%d len=%d", currentPollAddress, messageBuffer.getLength());
                         messageBuffer.complete = true;
                         state = STATE_IDLE;
                     }
