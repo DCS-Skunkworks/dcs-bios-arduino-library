@@ -101,6 +101,7 @@
 // Timing Constants
 #define SYNC_TIMEOUT_US     500     // 500µs silence = sync detected
 #define RX_TIMEOUT_SYMBOLS  12      // ~480µs at 250kbaud (12 symbol times)
+#define RX_FRAME_TIMEOUT_US 5000    // 5ms timeout to reset if stuck mid-frame
 
 // Defensive Options (matches AVR behavior for edge cases)
 #define ENABLE_RX_OVERFLOW_CHECK  0       // Set to 1 to enable overflow protection
@@ -752,6 +753,15 @@ static void sendZeroLengthResponse() {
  */
 static void processRS485() {
     int64_t now = esp_timer_get_time();
+
+    // =========================================================================
+    // Frame Timeout Safety - Reset if stuck mid-frame for 5ms
+    // =========================================================================
+    // If we're in an intermediate state and haven't received data for 5ms,
+    // something went wrong - reset to SYNC to recover
+    if (rs485State != STATE_SYNC && (now - lastRxTime) >= RX_FRAME_TIMEOUT_US) {
+        rs485State = STATE_SYNC;
+    }
 
     // =========================================================================
     // Sync Detection - 500µs of bus silence
