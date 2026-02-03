@@ -86,8 +86,8 @@
 // Pin Configuration (Waveshare ESP32-S3-RS485-CAN defaults)
 #define RS485_TX_PIN    17
 #define RS485_RX_PIN    18
-#define RS485_DE_PIN    -1    // Set to -1 for auto-direction transceivers (no DE pin needed)
-                              // Set to GPIO number for hardware DE control (e.g., 21)
+#define RS485_DE_PIN    21    // GPIO for hardware DE control (Waveshare ESP32-S3 uses 21)
+                              // Set to -1 for auto-direction transceivers (no DE pin needed)
 
 // UART Configuration
 #define RS485_UART_NUM  1        // UART1 (UART0 is typically used for USB/debug)
@@ -106,6 +106,7 @@
 // DEBUG MODE - Set to 1 to enable diagnostic output via USB Serial
 // ============================================================================
 #define DEBUG_MODE          1       // Set to 0 to disable all debug output
+#define DEBUG_VERBOSE       0       // Set to 1 for detailed frame-by-frame logging
 
 #if DEBUG_MODE
     #define DBG_INIT()      Serial.begin(115200); delay(2000)
@@ -117,6 +118,17 @@
     #define DBG(x)
     #define DBGLN(x)
     #define DBGF(...)
+#endif
+
+// Verbose logging for detailed protocol debugging (very spammy)
+#if DEBUG_VERBOSE
+    #define DBGV(x)         Serial.print(x)
+    #define DBGVLN(x)       Serial.println(x)
+    #define DBGVF(...)      Serial.printf(__VA_ARGS__)
+#else
+    #define DBGV(x)
+    #define DBGVLN(x)
+    #define DBGVF(...)
 #endif
 
 // ============================================================================
@@ -566,6 +578,15 @@ static volatile RxDataType rxDataType = RXDATA_IGNORE;
 static volatile int64_t lastRxTime = 0;
 static uart_port_t uartNum = (uart_port_t)RS485_UART_NUM;
 
+// Debug counters for periodic status report
+#if DEBUG_MODE
+static uint32_t dbgPollCount = 0;      // Polls received for us
+static uint32_t dbgBcastCount = 0;     // Broadcasts received
+static uint32_t dbgTxCount = 0;        // Data responses sent
+static uint32_t dbgErrCount = 0;       // Protocol errors
+static uint32_t dbgLastReport = 0;     // Last status report time
+#endif
+
 // ============================================================================
 // HARDWARE RS485 INITIALIZATION
 // ============================================================================
@@ -725,6 +746,10 @@ static void sendResponse() {
     // This ensures the hardware has finished transmitting
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
 
+    // CRITICAL: Flush any echo bytes that may have been received during TX
+    // Even with hardware RS485 mode, transceiver settling can cause brief echoes
+    uart_flush_input(uartNum);
+
     // Reset timing reference after TX
     lastRxTime = esp_timer_get_time();
 
@@ -745,6 +770,9 @@ static void sendZeroLengthResponse() {
     // Hardware handles DE automatically
     uart_write_bytes(uartNum, (const char*)&response, 1);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
+
+    // CRITICAL: Flush any echo bytes that may have been received during TX
+    uart_flush_input(uartNum);
 
     // Reset timing reference after TX
     lastRxTime = esp_timer_get_time();
@@ -773,7 +801,7 @@ static void processRS485() {
     if (rs485State == STATE_SYNC) {
         if ((now - lastRxTime) >= SYNC_TIMEOUT_US) {
             rs485State = STATE_RX_WAIT_ADDRESS;
-            DBGLN("[SYNC->RDY]");  // Sync complete, ready to receive
+            DBGVLN("[SYNC->RDY]");  // Sync complete, ready to receive
         }
     }
 
@@ -783,13 +811,13 @@ static void processRS485() {
     size_t available = 0;
     uart_get_buffered_data_len(uartNum, &available);
 
-#if DEBUG_MODE
+#if DEBUG_VERBOSE
     // Show when data arrives (only once per batch, not per byte)
     if (available > 0) {
         static uint32_t lastRxReport = 0;
         uint32_t nowMs = millis();
         if (nowMs - lastRxReport > 100) {  // Rate limit to every 100ms
-            DBGF("[RX %d bytes]\n", available);
+            DBGVF("[RX %d bytes]\n", available);
             lastRxReport = nowMs;
         }
     }
@@ -805,7 +833,7 @@ static void processRS485() {
         switch (rs485State) {
             case STATE_SYNC:
                 // Byte received during sync - stay in sync, wait for silence
-                DBGF("[SYNC:0x%02X]\n", c);
+                DBGVF("[SYNC:0x%02X]\n", c);
                 break;
 
             case STATE_RX_WAIT_ADDRESS:
@@ -821,7 +849,7 @@ static void processRS485() {
             case STATE_RX_WAIT_DATALENGTH:
                 rxtxLen = c;
                 // Log every frame header: [addr][msgtype][len]
-                DBGF("[FRM a=%d m=%d l=%d]\n", rxSlaveAddress, rxMsgType, rxtxLen);
+                DBGVF("[FRM a=%d m=%d l=%d]\n", rxSlaveAddress, rxMsgType, rxtxLen);
 
                 if (rxtxLen == 0) {
                     goto handle_message_complete;
@@ -851,7 +879,7 @@ static void processRS485() {
 
             case STATE_RX_WAIT_ANSWER_DATALENGTH:
                 rxtxLen = c;
-                DBGF("[ANS l=%d]\n", rxtxLen);
+                DBGVF("[ANS l=%d]\n", rxtxLen);
                 if (rxtxLen == 0) {
                     rs485State = STATE_RX_WAIT_ADDRESS;
                 } else {
@@ -883,28 +911,50 @@ static void processRS485() {
     handle_message_complete:
         if (rxSlaveAddress == 0) {
             // Broadcast - no response
-            DBGLN("[BCAST]");
+            DBGVLN("[BCAST]");
+#if DEBUG_MODE
+            dbgBcastCount++;
+#endif
             rs485State = STATE_RX_WAIT_ADDRESS;
         } else if (rxSlaveAddress == SLAVE_ADDRESS) {
             // This message is for us!
             if (rxMsgType == 0 && rxtxLen == 0) {
+#if DEBUG_MODE
+                dbgPollCount++;
+#endif
                 if (!messageBuffer.complete) {
-                    DBGLN("[POLL->TX0]");  // Poll received, sending zero-length
+                    DBGVLN("[POLL->TX0]");  // Poll received, sending zero-length
                     sendZeroLengthResponse();
                 } else {
-                    DBGF("[POLL->TX%d]\n", messageBuffer.getLength());  // Poll received, sending data
+#if DEBUG_MODE
+                    dbgTxCount++;
+#endif
+                    DBGF("[TX%d]\n", messageBuffer.getLength());  // Sending data (keep visible)
                     sendResponse();
                 }
             } else {
-                DBGF("[UNEXPECTED m=%d l=%d->SYNC]\n", rxMsgType, rxtxLen);
+#if DEBUG_MODE
+                dbgErrCount++;
+#endif
+                DBGF("[ERR m=%d l=%d]\n", rxMsgType, rxtxLen);  // Unexpected message (keep visible)
                 rs485State = STATE_SYNC;
             }
         } else {
             // Message for another slave
-            DBGF("[OTHER s=%d]\n", rxSlaveAddress);
+            DBGVF("[OTHER s=%d]\n", rxSlaveAddress);
             rs485State = STATE_RX_WAIT_ANSWER_DATALENGTH;
         }
     }
+
+#if DEBUG_MODE
+    // Periodic status report (every 5 seconds)
+    uint32_t nowMs = millis();
+    if (nowMs - dbgLastReport >= 5000) {
+        DBGF("[STATS] polls=%lu bcast=%lu tx=%lu err=%lu\n",
+             dbgPollCount, dbgBcastCount, dbgTxCount, dbgErrCount);
+        dbgLastReport = nowMs;
+    }
+#endif
 }
 
 // ============================================================================
