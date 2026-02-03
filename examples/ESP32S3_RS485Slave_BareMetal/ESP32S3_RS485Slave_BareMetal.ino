@@ -89,6 +89,11 @@
 #define RS485_DE_PIN    21    // GPIO for hardware DE control (Waveshare ESP32-S3 uses 21)
                               // Set to -1 for auto-direction transceivers (no DE pin needed)
 
+// DE Pin Polarity - TRY CHANGING THIS IF YOU SEE CORRUPTED DATA!
+// 0 = Normal (DE HIGH during TX) - standard for most RS485 transceivers
+// 1 = Inverted (DE LOW during TX) - some boards have inverters on DE line
+#define RS485_DE_INVERT 0
+
 // UART Configuration
 #define RS485_UART_NUM  1        // UART1 (UART0 is typically used for USB/debug)
 #define RS485_BAUD_RATE 250000   // DCS-BIOS standard baud rate
@@ -666,6 +671,14 @@ static void initRS485Hardware() {
     // Enable hardware RS485 mode with automatic DE control
     ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX));
 
+#if RS485_DE_INVERT
+    // Invert DE polarity if needed (some boards have inverters on DE line)
+    ESP_ERROR_CHECK(uart_set_line_inverse(uartNum, UART_SIGNAL_RTS_INV));
+    DBGLN("[DE POLARITY: INVERTED]");
+#else
+    DBGLN("[DE POLARITY: NORMAL]");
+#endif
+
 #else
     // =========================================================================
     // MODE 2: Auto-Direction Transceiver (RS485_DE_PIN = -1)
@@ -930,7 +943,9 @@ static void processRS485() {
                 // Protocol sanity check: data length must be reasonable
                 // (matches AVR buffer overflow protection behavior)
                 if (rxtxLen > MAX_FRAME_DATA_SIZE) {
-                    DBGF("[ERR len=%d > max]\n", rxtxLen);
+                    // Show full frame header for debugging - this is garbage data!
+                    DBGF("[ERR GARBAGE FRAME: addr=0x%02X msgtype=0x%02X len=%d]\n",
+                         rxSlaveAddress, rxMsgType, rxtxLen);
 #if DEBUG_MODE
                     dbgErrCount++;
 #endif
