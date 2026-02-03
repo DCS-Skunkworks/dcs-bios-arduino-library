@@ -689,7 +689,7 @@ static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
     uint8_t len = messageBuffer.getLength();
 
-    packet[0] = len + 1;  // Length includes msgtype byte (per DCS-BIOS protocol)
+    packet[0] = len;      // Length = data bytes only (matches AVR Slave protocol)
     packet[1] = 0;        // Message type = 0 (DCS-BIOS data)
 
     for (uint8_t i = 0; i < len; i++) {
