@@ -98,6 +98,18 @@
 #define SYNC_TIMEOUT_US      500     // 500µs silence = sync
 #define MAX_POLL_INTERVAL_US 2000    // Ensure we poll at least every 2ms
 
+// ============================================================================
+// UDP DEBUG LOGGING - Set to 1 to enable WiFi-based debug output
+// ============================================================================
+// This sends debug data via UDP without affecting RS485 timing.
+// Useful for debugging when USB Serial would add latency.
+
+#define UDP_DEBUG_ENABLE    0       // Set to 1 to enable UDP debug
+#define UDP_DEBUG_IP        "192.168.1.255"  // Broadcast or specific IP
+#define UDP_DEBUG_PORT      5555
+#define WIFI_SSID           "YourWiFiSSID"
+#define WIFI_PASSWORD       "YourWiFiPassword"
+
 // Broadcast chunking - prevents bus hogging during heavy export traffic
 #define MAX_BROADCAST_CHUNK  64      // Max bytes per broadcast burst
 
@@ -131,8 +143,78 @@
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
 
+#if UDP_DEBUG_ENABLE
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#endif
+
 // PC Serial - works on ALL ESP32 variants
 #define PC_SERIAL Serial
+
+// ============================================================================
+// UDP DEBUG CLASS - Non-blocking debug output via WiFi
+// ============================================================================
+
+#if UDP_DEBUG_ENABLE
+class UdpDebug {
+private:
+    WiFiUDP udp;
+    IPAddress targetIP;
+    bool connected;
+    char buffer[256];
+
+public:
+    UdpDebug() : connected(false) {}
+
+    void begin() {
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        // Don't wait for connection - will check later
+        targetIP.fromString(UDP_DEBUG_IP);
+        connected = false;
+    }
+
+    void checkConnection() {
+        if (!connected && WiFi.status() == WL_CONNECTED) {
+            connected = true;
+            send("UDP Debug connected, IP: %s", WiFi.localIP().toString().c_str());
+        }
+    }
+
+    void send(const char* fmt, ...) {
+        if (!connected) return;
+
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(buffer, sizeof(buffer), fmt, args);
+        va_end(args);
+
+        // Non-blocking UDP send
+        udp.beginPacket(targetIP, UDP_DEBUG_PORT);
+        udp.write((uint8_t*)buffer, strlen(buffer));
+        udp.endPacket();
+    }
+
+    void sendHex(const char* prefix, uint8_t* data, size_t len) {
+        if (!connected) return;
+
+        int pos = snprintf(buffer, sizeof(buffer), "%s: ", prefix);
+        for (size_t i = 0; i < len && pos < (int)sizeof(buffer) - 4; i++) {
+            pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%02X ", data[i]);
+        }
+
+        udp.beginPacket(targetIP, UDP_DEBUG_PORT);
+        udp.write((uint8_t*)buffer, strlen(buffer));
+        udp.endPacket();
+    }
+};
+
+UdpDebug udpDbg;
+#define UDP_DBG(fmt, ...) udpDbg.send(fmt, ##__VA_ARGS__)
+#define UDP_DBG_HEX(prefix, data, len) udpDbg.sendHex(prefix, data, len)
+#else
+#define UDP_DBG(fmt, ...)
+#define UDP_DBG_HEX(prefix, data, len)
+#endif
 
 // ============================================================================
 // FREERTOS TX TASK CONFIGURATION
@@ -412,6 +494,7 @@ public:
                 if ((now - rxStartTime) > POLL_TIMEOUT_US) {
                     slavePresent[currentPollAddress] = false;
                     sendTimeoutZeroByte();
+                    UDP_DBG("POLL_TIMEOUT addr=%d", currentPollAddress);
                     return;
                 }
                 {
@@ -421,6 +504,7 @@ public:
                         uint8_t c;
                         uart_read_bytes(uartNum, &c, 1, 0);
                         rxtxLen = c;
+                        UDP_DBG("RX_LEN addr=%d len=%d", currentPollAddress, rxtxLen);
                         slavePresent[currentPollAddress] = true;
                         if (rxtxLen > 0) {
                             state = STATE_RX_WAIT_MSGTYPE;
@@ -434,6 +518,7 @@ public:
 
             case STATE_RX_WAIT_MSGTYPE:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
+                    UDP_DBG("RX_TIMEOUT_MSGTYPE addr=%d waited=%lld", currentPollAddress, now - rxStartTime);
                     messageBuffer.clear();
                     messageBuffer.put('\n');
                     messageBuffer.complete = true;
@@ -447,6 +532,7 @@ public:
                         uint8_t c;
                         uart_read_bytes(uartNum, &c, 1, 0);
                         rxMsgType = c;
+                        UDP_DBG("RX_MSGTYPE addr=%d msgtype=%d", currentPollAddress, rxMsgType);
                         state = STATE_RX_WAIT_DATA;
                     }
                 }
@@ -454,6 +540,7 @@ public:
 
             case STATE_RX_WAIT_DATA:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
+                    UDP_DBG("RX_TIMEOUT_DATA addr=%d remaining=%d", currentPollAddress, rxtxLen);
                     messageBuffer.clear();
                     messageBuffer.put('\n');
                     messageBuffer.complete = true;
@@ -471,6 +558,7 @@ public:
                         available--;
                     }
                     if (rxtxLen == 0) {
+                        UDP_DBG("RX_DATA_COMPLETE addr=%d buflen=%d", currentPollAddress, messageBuffer.getLength());
                         state = STATE_RX_WAIT_CHECKSUM;
                     }
                 }
@@ -478,6 +566,7 @@ public:
 
             case STATE_RX_WAIT_CHECKSUM:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
+                    UDP_DBG("RX_TIMEOUT_CHECKSUM addr=%d", currentPollAddress);
                     messageBuffer.clear();
                     messageBuffer.put('\n');
                     messageBuffer.complete = true;
@@ -491,6 +580,7 @@ public:
                         uint8_t c;
                         uart_read_bytes(uartNum, &c, 1, 0);
                         (void)c;  // Checksum ignored (like AVR)
+                        UDP_DBG("RX_COMPLETE addr=%d len=%d", currentPollAddress, messageBuffer.getLength());
                         messageBuffer.complete = true;
                         state = STATE_IDLE;
                     }
@@ -596,6 +686,12 @@ void setup() {
     PC_SERIAL.begin(250000);
     delay(100);
 
+#if UDP_DEBUG_ENABLE
+    // Initialize WiFi for UDP debug (non-blocking)
+    udpDbg.begin();
+    PC_SERIAL.println("UDP Debug: Connecting to WiFi...");
+#endif
+
     // Create shared TX queue
     txQueue = xQueueCreate(TX_QUEUE_LENGTH, sizeof(TxRequest));
     if (txQueue == NULL) {
@@ -622,6 +718,11 @@ void setup() {
 }
 
 void loop() {
+#if UDP_DEBUG_ENABLE
+    // Check WiFi connection status (non-blocking)
+    udpDbg.checkConnection();
+#endif
+
     // Read export data from PC (distributes to all buses)
     processPCInput();
 
