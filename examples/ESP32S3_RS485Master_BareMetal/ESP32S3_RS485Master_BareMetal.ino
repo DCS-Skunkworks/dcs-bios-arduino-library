@@ -115,7 +115,11 @@
 // Broadcast chunking - prevents bus hogging during heavy export traffic
 #define MAX_BROADCAST_CHUNK  64      // Max bytes per broadcast burst
 
-// Maximum number of slaves per bus (addresses 1-127)
+// Slave address range to scan (1-127 valid, 0 is broadcast)
+#define MIN_SLAVE_ADDRESS   1       // First slave address to poll
+#define MAX_SLAVE_ADDRESS   1       // Last slave address to poll (set to 1 for single slave testing)
+
+// Internal array size - don't change
 #define MAX_SLAVES          128
 
 // ============================================================================
@@ -335,7 +339,8 @@ public:
         : uartNum((uart_port_t)uartNum), txPin(txPin), rxPin(rxPin), dePin(dePin),
           state(STATE_IDLE), rxStartTime(0), rxtxLen(0), rxMsgType(0),
           txBusy(false), lastPollTime(0),
-          pollAddressCounter(1), scanAddressCounter(1), currentPollAddress(1),
+          pollAddressCounter(MIN_SLAVE_ADDRESS), scanAddressCounter(MIN_SLAVE_ADDRESS),
+          currentPollAddress(MIN_SLAVE_ADDRESS),
           next(nullptr)
     {
         // Add to linked list
@@ -393,22 +398,28 @@ public:
     }
 
     void advancePollAddress() {
-        pollAddressCounter = (pollAddressCounter + 1) % MAX_SLAVES;
-        while (!slavePresent[pollAddressCounter]) {
-            pollAddressCounter = (pollAddressCounter + 1) % MAX_SLAVES;
+        // Advance through address range, wrapping at MAX_SLAVE_ADDRESS
+        pollAddressCounter++;
+        if (pollAddressCounter > MAX_SLAVE_ADDRESS) {
+            pollAddressCounter = MIN_SLAVE_ADDRESS;
         }
 
-        if (pollAddressCounter == 0) {
-            scanAddressCounter = (scanAddressCounter + 1) % MAX_SLAVES;
-            while (slavePresent[scanAddressCounter]) {
-                scanAddressCounter = (scanAddressCounter + 1) % MAX_SLAVES;
-                if (scanAddressCounter == 0) {
-                    currentPollAddress = 1;
-                    return;
-                }
+        // Skip to next known slave (for efficiency with large address ranges)
+        uint8_t startAddr = pollAddressCounter;
+        while (!slavePresent[pollAddressCounter]) {
+            pollAddressCounter++;
+            if (pollAddressCounter > MAX_SLAVE_ADDRESS) {
+                pollAddressCounter = MIN_SLAVE_ADDRESS;
             }
-            currentPollAddress = scanAddressCounter;
-            return;
+            if (pollAddressCounter == startAddr) {
+                // No known slaves - scan for new ones
+                scanAddressCounter++;
+                if (scanAddressCounter > MAX_SLAVE_ADDRESS) {
+                    scanAddressCounter = MIN_SLAVE_ADDRESS;
+                }
+                currentPollAddress = scanAddressCounter;
+                return;
+            }
         }
         currentPollAddress = pollAddressCounter;
     }
