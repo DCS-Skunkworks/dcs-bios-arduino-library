@@ -94,6 +94,10 @@
 #define RX_TIMEOUT_SYMBOLS  12      // ~480µs at 250kbaud (12 symbol times)
 #define RX_FRAME_TIMEOUT_US 5000    // 5ms timeout to reset mid-frame RX
 
+// Defensive Options (matches AVR behavior for edge cases)
+#define ENABLE_RX_OVERFLOW_CHECK  0       // Set to 1 to enable overflow protection
+#define MAX_RX_FRAME_BYTES        256     // Max bytes per frame before forced SYNC reset
+
 // ============================================================================
 // ESP32 HARDWARE INCLUDES
 // ============================================================================
@@ -540,6 +544,10 @@ static volatile uint8_t rxtxLen = 0;
 static volatile RxDataType rxDataType = RXDATA_IGNORE;
 static volatile int64_t lastRxTime = 0;
 
+#if ENABLE_RX_OVERFLOW_CHECK
+static volatile uint16_t rxFrameByteCount = 0;  // Tracks bytes in current frame
+#endif
+
 static uart_port_t uartNum = (uart_port_t)RS485_UART_NUM;
 
 // ============================================================================
@@ -751,6 +759,9 @@ static void processRS485() {
     // =========================================================================
     if (rs485State == STATE_SYNC) {
         if ((now - lastRxTime) >= SYNC_TIMEOUT_US) {
+#if ENABLE_RX_OVERFLOW_CHECK
+            rxFrameByteCount = 0;  // Reset frame byte counter for new frame
+#endif
             rs485State = STATE_RX_WAIT_ADDRESS;
         }
     }
@@ -801,6 +812,17 @@ static void processRS485() {
 
             case STATE_RX_WAIT_DATA:
                 rxtxLen--;
+
+#if ENABLE_RX_OVERFLOW_CHECK
+                // Defensive overflow check (matches AVR behavior)
+                // If we've received too many bytes in one frame, something is wrong - reset to SYNC
+                rxFrameByteCount++;
+                if (rxFrameByteCount > MAX_RX_FRAME_BYTES) {
+                    lastRxTime = now;
+                    rs485State = STATE_SYNC;
+                    break;
+                }
+#endif
 
                 if (rxDataType == RXDATA_DCSBIOS_EXPORT) {
                     parser.processChar(c);
