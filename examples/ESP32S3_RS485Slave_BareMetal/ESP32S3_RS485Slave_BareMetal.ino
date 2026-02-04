@@ -546,37 +546,43 @@ static inline void IRAM_ATTR setDE_ISR(bool high) {
 // TX FROM ISR - Send response immediately!
 // ============================================================================
 
+// Small delay for DE pin stabilization (inline for speed)
+static inline void IRAM_ATTR deStabilizationDelay() {
+    // ~2µs delay at 240MHz - lets transceiver switch to TX mode
+    for (volatile int i = 0; i < 120; i++) { __asm__ __volatile__("nop"); }
+}
+
 static void IRAM_ATTR sendResponseISR() {
     uint8_t len = messageBuffer.getLengthISR();
 
-    // Enable driver
-    setDE_ISR(true);
+    // Build complete response in local buffer for continuous transmission
+    uint8_t txBuf[MESSAGE_BUFFER_SIZE + 4];  // len + msgtype + data + checksum
+    uint8_t txLen = 0;
 
-    // Send length byte
-    uart_ll_write_txfifo(uartHw, (const uint8_t*)&len, 1);
-    while (!uart_ll_is_tx_idle(uartHw));
+    txBuf[txLen++] = len;        // Length byte
+    txBuf[txLen++] = 0;          // MsgType = 0
 
-    // Send msgtype (0)
-    uint8_t zero = 0;
-    uart_ll_write_txfifo(uartHw, &zero, 1);
-    while (!uart_ll_is_tx_idle(uartHw));
-
-    // Send data bytes
+    // Copy data from message buffer
     for (uint8_t i = 0; i < len; i++) {
-        uint8_t b = messageBuffer.getISR();
-        uart_ll_write_txfifo(uartHw, &b, 1);
-        while (!uart_ll_is_tx_idle(uartHw));
+        txBuf[txLen++] = messageBuffer.getISR();
     }
 
-    // Send checksum
-    uint8_t checksum = 0x72;
-    uart_ll_write_txfifo(uartHw, &checksum, 1);
+    txBuf[txLen++] = 0x72;       // Checksum
+
+    // Enable driver and let it stabilize
+    setDE_ISR(true);
+    deStabilizationDelay();
+
+    // Send entire buffer at once - FIFO is 128 bytes, plenty for our messages
+    uart_ll_write_txfifo(uartHw, txBuf, txLen);
+
+    // Wait for transmission to complete
     while (!uart_ll_is_tx_idle(uartHw));
 
     // Disable driver
     setDE_ISR(false);
 
-    // Flush RX (echo)
+    // Flush RX FIFO (echo bytes)
     uart_ll_rxfifo_rst(uartHw);
 
     // Clear message buffer
@@ -586,18 +592,22 @@ static void IRAM_ATTR sendResponseISR() {
 }
 
 static void IRAM_ATTR sendZeroLengthResponseISR() {
-    // Enable driver
-    setDE_ISR(true);
-
-    // Send zero length
     uint8_t zero = 0;
+
+    // Enable driver and let it stabilize
+    setDE_ISR(true);
+    deStabilizationDelay();
+
+    // Send zero length byte
     uart_ll_write_txfifo(uartHw, &zero, 1);
+
+    // Wait for transmission to complete
     while (!uart_ll_is_tx_idle(uartHw));
 
     // Disable driver
     setDE_ISR(false);
 
-    // Flush RX (echo)
+    // Flush RX FIFO (echo)
     uart_ll_rxfifo_rst(uartHw);
 
     rs485State = STATE_RX_WAIT_ADDRESS;
