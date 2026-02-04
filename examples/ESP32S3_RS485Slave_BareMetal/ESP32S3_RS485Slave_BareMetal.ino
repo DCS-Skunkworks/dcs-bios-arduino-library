@@ -572,7 +572,7 @@ static void initRS485Hardware() {
 }
 
 // ============================================================================
-// TX HANDLING - DIRECT FIFO ACCESS WITH CRITICAL SECTION
+// TX HANDLING - BYTE-BY-BYTE TRANSMISSION (like AVR ISR-driven approach)
 // ============================================================================
 
 // Spinlock for critical sections - prevents WiFi/radio ISRs from corrupting TX timing
@@ -581,14 +581,14 @@ static portMUX_TYPE txMutex = portMUX_INITIALIZER_UNLOCKED;
 // Get the hardware UART device pointer for direct register access
 static uart_dev_t* const uartHw = &UART1;
 
-// Write bytes directly to UART FIFO - NO FreeRTOS, safe in critical section
-static void writeToFifo(const uint8_t* data, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        // Wait for space in FIFO (128 bytes on ESP32-S3)
-        while (uart_ll_get_txfifo_len(uartHw) == 0) {
-            // Spin
-        }
-        uart_ll_write_txfifo(uartHw, &data[i], 1);
+// Write ONE byte and wait for it to be transmitted before returning
+// This mimics AVR's ISR-driven byte-by-byte transmission with natural gaps
+static inline void txByte(uint8_t c) {
+    // Write byte to FIFO
+    uart_ll_write_txfifo(uartHw, &c, 1);
+    // Wait for this byte to be fully transmitted (shift register empty)
+    while (!uart_ll_is_tx_idle(uartHw)) {
+        // Spin
     }
 }
 
@@ -608,26 +608,20 @@ static void sendResponse() {
     size_t totalBytes = 3 + len;
 
     // =========================================================================
-    // CRITICAL SECTION: Disable ALL interrupts during TX
-    // Uses direct FIFO writes - uart_write_bytes() uses FreeRTOS semaphores
-    // which CANNOT be called inside critical sections!
+    // CRITICAL SECTION with byte-by-byte transmission (like AVR ISR approach)
+    // Each byte is fully transmitted before the next is sent, creating
+    // natural timing gaps like AVR's ISR-driven transmission
     // =========================================================================
     portENTER_CRITICAL(&txMutex);
 
 #if RS485_DE_PIN >= 0
     setDE(true);
-    delayMicroseconds(PRE_TX_DELAY_US);  // Configurable pre-TX delay
 #endif
 
-    // Direct FIFO write - no FreeRTOS calls
-    writeToFifo(packet, totalBytes);
-
-    // Busy-wait for TX shift register to empty
-    while (!uart_ll_is_tx_idle(uartHw)) {
-        // Spin until last bit shifted out
+    // Transmit byte-by-byte, waiting for each to complete (like AVR ISR)
+    for (size_t i = 0; i < totalBytes; i++) {
+        txByte(packet[i]);
     }
-
-    delayMicroseconds(POST_TX_DELAY_US);  // Configurable post-TX delay
 
 #if RS485_DE_PIN >= 0
     setDE(false);  // Return to RX mode
@@ -653,22 +647,13 @@ static void sendResponse() {
 }
 
 static void sendZeroLengthResponse() {
-    uint8_t response = 0;
-
     portENTER_CRITICAL(&txMutex);
 
 #if RS485_DE_PIN >= 0
     setDE(true);
-    delayMicroseconds(PRE_TX_DELAY_US);
 #endif
 
-    writeToFifo(&response, 1);
-
-    while (!uart_ll_is_tx_idle(uartHw)) {
-        // Spin until last bit shifted out
-    }
-
-    delayMicroseconds(POST_TX_DELAY_US);
+    txByte(0);  // Zero-length response
 
 #if RS485_DE_PIN >= 0
     setDE(false);
