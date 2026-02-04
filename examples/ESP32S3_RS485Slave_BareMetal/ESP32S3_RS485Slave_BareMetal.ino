@@ -871,6 +871,11 @@ static void sendResponse() {
 
     // Wait for TX to complete before releasing DE
     esp_err_t txResult = uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+
+    // Small delay to ensure stop bit fully completes before DE release
+    // At 250kbaud: 1 bit = 4µs, so 10µs gives 2+ bit times margin
+    delayMicroseconds(10);
+
     deRelease();  // Disable transmitter, enable receiver
 
     // Flush any echo bytes
@@ -908,7 +913,8 @@ static void sendZeroLengthResponse() {
     // Transmit with DE control
     deAssert();  // Enable transmitter
     uart_write_bytes(uartNum, (const char*)&response, 1);
-    esp_err_t txResult = uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+    uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+    delayMicroseconds(10);  // Ensure stop bit completes
     deRelease();  // Disable transmitter, enable receiver
 
     // Flush any echo bytes (don't spam debug)
