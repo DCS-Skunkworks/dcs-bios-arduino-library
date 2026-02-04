@@ -554,6 +554,10 @@ static void sendResponse() {
 
     size_t totalBytes = 3 + len;
 
+    // Small delay before TX to let transceiver fully switch
+    // The AVR's tx_delay_byte() creates ~40µs delay - let's try similar
+    delayMicroseconds(40);
+
     // Simple TX - hardware handles DE
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
@@ -567,6 +571,7 @@ static void sendResponse() {
 
 static void sendZeroLengthResponse() {
     uint8_t response = 0;
+    delayMicroseconds(40);  // Same delay as sendResponse
     uart_write_bytes(uartNum, (const char*)&response, 1);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
     rs485State = STATE_RX_WAIT_ADDRESS;
