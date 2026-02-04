@@ -1072,6 +1072,7 @@ static void processRS485() {
                 } else {
 #if UDP_DEBUG_ENABLE
                     dbgTxCount++;
+                    DBGF("[TX] sending %d bytes\n", messageBuffer.getLength());
 #endif
                     // CRITICAL: Call sendResponse() IMMEDIATELY!
                     // Debug output is printed AFTER TX inside the function.
