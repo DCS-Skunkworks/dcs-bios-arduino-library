@@ -41,10 +41,12 @@
 #define FRAME_TIMEOUT_US      0     // Reset if stuck mid-frame (0 = disabled)
 #define POST_TX_DELAY_US      0     // Any delay here causes the slave to send blanks.. why?
 
+#define DELAY_MICRO 0 // Set to 0
+
 // ============================================================================
 // DEBUG OPTIONS
 // ============================================================================
-#define UDP_DEBUG_ENABLE    1
+#define UDP_DEBUG_ENABLE    0
 #define DEBUG_TX_HEX        1       // Log transmitted bytes as hex
 #define WIFI_SSID           "TestNetwork"
 #define WIFI_PASSWORD       "TestingOnly"
@@ -592,7 +594,7 @@ static uart_dev_t* const uartHw = &UART1;
 
 // DE settle delay after enabling transceiver (microseconds)
 // MAX13488E needs ~30ns, but GPIO + bus settling may need more
-static constexpr uint32_t DE_SETTLE_US = 2;
+static constexpr uint32_t DE_SETTLE_US = DELAY_MICRO;
 
 static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
