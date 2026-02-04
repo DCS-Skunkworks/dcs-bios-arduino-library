@@ -749,6 +749,7 @@ static void IRAM_ATTR uart_isr_handler(void *arg) {
 // ============================================================================
 
 static void initRS485Hardware() {
+    Serial.println("  [1] Configuring DE GPIO pin...");
     // =========================================================================
     // GPIO: DE pin for RS485 direction control
     // =========================================================================
@@ -762,8 +763,12 @@ static void initRS485Hardware() {
     };
     gpio_config(&io_conf);
     setDE_ISR(false);  // Start in RX mode
+    Serial.println("  [1] DE GPIO configured OK");
+#else
+    Serial.println("  [1] No DE pin configured");
 #endif
 
+    Serial.println("  [2] Configuring UART...");
     // =========================================================================
     // UART: Configure for 250kbaud, install driver first for pin config
     // =========================================================================
@@ -777,30 +782,46 @@ static void initRS485Hardware() {
         .source_clk = UART_CLOCK_SOURCE
     };
 
+    Serial.println("  [3] Installing UART driver...");
     // Install driver with minimal buffers (we handle RX in ISR)
     ESP_ERROR_CHECK(uart_driver_install((uart_port_t)RS485_UART_NUM, 256, 0, 0, NULL, 0));
+    Serial.println("  [3] UART driver installed OK");
+
+    Serial.println("  [4] Configuring UART params...");
     ESP_ERROR_CHECK(uart_param_config((uart_port_t)RS485_UART_NUM, &uart_config));
+    Serial.println("  [4] UART params configured OK");
+
+    Serial.println("  [5] Setting UART pins...");
     ESP_ERROR_CHECK(uart_set_pin((uart_port_t)RS485_UART_NUM,
                                   RS485_TX_PIN, RS485_RX_PIN,
                                   UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    Serial.println("  [5] UART pins set OK");
 
+    Serial.println("  [6] Disabling default RX interrupt...");
     // Disable driver's default ISR handling
     ESP_ERROR_CHECK(uart_disable_rx_intr((uart_port_t)RS485_UART_NUM));
+    Serial.println("  [6] Default RX interrupt disabled OK");
 
     // =========================================================================
     // Register our own ISR for immediate response
     // =========================================================================
 
+    Serial.println("  [7] Setting RX FIFO threshold...");
     // Configure RX FIFO threshold - trigger on every byte for lowest latency
     uart_ll_set_rxfifo_full_thr(uartHw, 1);
+    Serial.println("  [7] RX FIFO threshold set OK");
 
+    Serial.println("  [8] Enabling RX FIFO interrupt...");
     // Enable RX FIFO full interrupt
     uart_ll_ena_intr_mask(uartHw, UART_INTR_RXFIFO_FULL);
+    Serial.println("  [8] RX FIFO interrupt enabled OK");
 
+    Serial.println("  [9] Allocating custom ISR...");
     // Allocate and register ISR using the peripheral signal table
     ESP_ERROR_CHECK(esp_intr_alloc(uart_periph_signal[RS485_UART_NUM].irq,
                                     ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL3,
                                     uart_isr_handler, NULL, &uartIntrHandle));
+    Serial.println("  [9] Custom ISR allocated OK");
 
     rs485State = STATE_SYNC;
     lastRxTime = esp_timer_get_time();
@@ -894,9 +915,27 @@ LED mcReadyLed(0x740C, 0x8000, MC_READY_PIN);
 // ============================================================================
 
 void setup() {
+    // Initialize Serial for debug output
+    Serial.begin(115200);
+    delay(1000);  // Give serial time to connect
+    Serial.println();
+    Serial.println("===========================================");
+    Serial.println("ESP32-S3 RS485 Slave - ISR Mode Starting...");
+    Serial.printf("Slave Address: %d\n", SLAVE_ADDRESS);
+    Serial.printf("Baud Rate: %d\n", RS485_BAUD_RATE);
+    Serial.printf("TX Pin: %d, RX Pin: %d, DE Pin: %d\n", RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN);
+    Serial.println("===========================================");
+
     udpDbgInit();
+
+    Serial.println("Initializing RS485 hardware...");
     initRS485Hardware();
+    Serial.println("RS485 hardware initialized!");
+    Serial.println("Entering main loop...");
 }
+
+static unsigned long lastHeartbeat = 0;
+static unsigned long loopCount = 0;
 
 void loop() {
     udpDbgCheck();
@@ -909,4 +948,14 @@ void loop() {
 
     // Update outputs (LEDs)
     ExportStreamListener::loopAll();
+
+    // Heartbeat every 5 seconds
+    loopCount++;
+    if (millis() - lastHeartbeat >= 5000) {
+        lastHeartbeat = millis();
+        Serial.printf("[ALIVE] loops=%lu, state=%d, exportBuf=%d/%d\n",
+                      loopCount, (int)rs485State,
+                      exportReadPos, exportWritePos);
+        loopCount = 0;
+    }
 }
