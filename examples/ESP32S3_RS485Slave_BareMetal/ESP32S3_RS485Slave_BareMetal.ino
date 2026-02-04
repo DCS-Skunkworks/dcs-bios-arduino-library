@@ -586,16 +586,17 @@ static void sendZeroLengthResponse() {
 static void processRS485() {
     int64_t now = esp_timer_get_time();
 
+    // Frame timeout - reset if stuck mid-frame too long
     if (rs485State != STATE_SYNC && (now - lastRxTime) >= RX_FRAME_TIMEOUT_US) {
         rs485State = STATE_SYNC;
     }
 
-    if (rs485State == STATE_SYNC) {
-        if ((now - lastRxTime) >= SYNC_TIMEOUT_US) {
-            rs485State = STATE_RX_WAIT_ADDRESS;
-        }
+    // Sync detection - 500µs silence means ready for new frame
+    if (rs485State == STATE_SYNC && (now - lastRxTime) >= SYNC_TIMEOUT_US) {
+        rs485State = STATE_RX_WAIT_ADDRESS;
     }
 
+    // Process all available RX bytes - NO unnecessary function calls!
     size_t available = 0;
     uart_get_buffered_data_len(uartNum, &available);
 
@@ -604,11 +605,19 @@ static void processRS485() {
         if (uart_read_bytes(uartNum, &c, 1, 0) != 1) break;
         available--;
 
-        lastRxTime = now;
+        // Capture current time for this byte
+        int64_t rxTime = esp_timer_get_time();
 
         switch (rs485State) {
             case STATE_SYNC:
-                break;
+                // AVR behavior: if 500µs passed since last byte, this is start of new frame
+                if ((rxTime - lastRxTime) < SYNC_TIMEOUT_US) {
+                    lastRxTime = rxTime;  // Update and stay in sync
+                    break;
+                }
+                // 500µs passed - transition and FALL THROUGH to process as address!
+                rs485State = STATE_RX_WAIT_ADDRESS;
+                // FALL THROUGH!
 
             case STATE_RX_WAIT_ADDRESS:
                 rxSlaveAddress = c;
@@ -677,6 +686,11 @@ static void processRS485() {
 
             default:
                 break;
+        }
+
+        // Update lastRxTime for frame timeout tracking (except SYNC which handles it)
+        if (rs485State != STATE_SYNC) {
+            lastRxTime = rxTime;
         }
 
         continue;
