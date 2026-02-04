@@ -120,7 +120,7 @@
 // This sends debug data via UDP without affecting RS485 timing.
 // Set UDP_DEBUG_ENABLE to 1 and configure WiFi to use.
 
-#define UDP_DEBUG_ENABLE    0       // Set to 1 to enable UDP debug (0 = disabled for best timing)
+#define UDP_DEBUG_ENABLE    1       // Set to 1 to enable UDP debug (0 = disabled for best timing)
 #define UDP_DEBUG_IP        "255.255.255.255"  // Broadcast to all
 #define UDP_DEBUG_PORT      4210    // CockpitOS debug port
 #define UDP_DEBUG_NAME      "RS485-SLAVE"     // Device identifier in debug messages
@@ -845,6 +845,8 @@ static void initRS485Hardware() {
  * For auto-direction transceivers, no DE control is needed.
  * For hardware RS485 mode, the UART peripheral handles DE automatically.
  */
+static uint32_t txSeqNum = 0;  // Sequence number to track transmissions
+
 static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
     uint8_t len = messageBuffer.getLength();
@@ -859,10 +861,42 @@ static void sendResponse() {
     packet[2 + len] = 0x72;  // Fixed checksum per DCS-BIOS protocol
 
     size_t totalBytes = 3 + len;
+    txSeqNum++;
+
+#if UDP_DEBUG_ENABLE
+    // Log BEFORE TX with detailed byte dump
+    char hexBuf[128];
+    int pos = 0;
+    for (size_t i = 0; i < totalBytes && pos < 120; i++) {
+        pos += snprintf(hexBuf + pos, sizeof(hexBuf) - pos, "%02X ", packet[i]);
+    }
+
+    // Also show as ASCII for the data portion
+    char ascBuf[64];
+    int ascPos = 0;
+    for (uint8_t i = 0; i < len && ascPos < 60; i++) {
+        char c = packet[2 + i];
+        if (c >= 32 && c <= 126) {
+            ascBuf[ascPos++] = c;
+        } else {
+            ascBuf[ascPos++] = '.';
+        }
+    }
+    ascBuf[ascPos] = '\0';
+
+    int64_t txStartTime = esp_timer_get_time();
+    udpDbgSend("TX#%lu len=%d total=%d hex=[%s] asc=\"%s\"",
+               txSeqNum, len, totalBytes, hexBuf, ascBuf);
+#endif
 
     // TX immediately - matches OLD working version (no turnaround delay)
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
+
+#if UDP_DEBUG_ENABLE
+    int64_t txEndTime = esp_timer_get_time();
+    udpDbgSend("TX#%lu DONE dt=%lldus", txSeqNum, txEndTime - txStartTime);
+#endif
 
     // NO ECHO HANDLING - auto-direction transceiver suppresses echo
     // The bytes we were seeing were NOT echo - they were the next
@@ -1020,6 +1054,10 @@ static void processRS485() {
                     // No data to send - respond immediately with zero-length
                     sendZeroLengthResponse();
                 } else {
+#if UDP_DEBUG_ENABLE
+                    // Log the poll that triggered our response
+                    udpDbgSend("POLL addr=%d msgLen=%d", rxSlaveAddress, messageBuffer.getLength());
+#endif
                     // Send our queued message
                     sendResponse();
                 }
