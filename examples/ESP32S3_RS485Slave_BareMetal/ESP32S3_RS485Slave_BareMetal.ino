@@ -609,13 +609,14 @@ static void sendResponse() {
 
     // =========================================================================
     // CRITICAL SECTION with byte-by-byte transmission (like AVR ISR approach)
-    // Each byte is fully transmitted before the next is sent, creating
-    // natural timing gaps like AVR's ISR-driven transmission
     // =========================================================================
     portENTER_CRITICAL(&txMutex);
 
 #if RS485_DE_PIN >= 0
     setDE(true);
+    // Small delay to let transceiver fully enable before first bit
+    // The MAX13488E needs ~30ns, but GPIO + bus settling might need more
+    delayMicroseconds(2);
 #endif
 
     // Transmit byte-by-byte, waiting for each to complete (like AVR ISR)
@@ -651,6 +652,7 @@ static void sendZeroLengthResponse() {
 
 #if RS485_DE_PIN >= 0
     setDE(true);
+    delayMicroseconds(2);  // Let transceiver enable
 #endif
 
     txByte(0);  // Zero-length response
