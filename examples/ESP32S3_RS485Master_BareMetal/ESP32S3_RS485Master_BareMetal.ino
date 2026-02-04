@@ -65,8 +65,11 @@
 // BUS 1 - Primary RS485 bus (enabled by default)
 #define BUS1_TX_PIN     17
 #define BUS1_RX_PIN     18
-#define BUS1_DE_PIN     21      // Set to -1 for auto-direction transceiver
+#define BUS1_DE_PIN     -1      // -1 = auto-direction mode (board may have built-in auto-dir)
 #define BUS1_UART_NUM   1       // UART1
+
+// DE Control Mode - Try MANUAL (1) if hardware RS485 mode has issues with your transceiver
+#define RS485_DE_MANUAL 1       // 0 = Hardware RS485 mode, 1 = Manual GPIO mode
 
 // BUS 2 - Secondary RS485 bus (disabled by default)
 #define BUS2_TX_PIN     -1      // Set to valid GPIO to enable
@@ -94,14 +97,36 @@
 
 // Timing Constants (microseconds)
 #define POLL_TIMEOUT_US      1000    // 1ms - timeout waiting for slave response
-#define RX_TIMEOUT_US        5000    // 5ms - timeout for complete message
+#define RX_TIMEOUT_US        20000   // 20ms - timeout for complete message (was 5ms)
 #define SYNC_TIMEOUT_US      500     // 500µs silence = sync
 #define MAX_POLL_INTERVAL_US 2000    // Ensure we poll at least every 2ms
+
+// ============================================================================
+// UDP DEBUG LOGGING - Set to 1 to enable WiFi-based debug output
+// ============================================================================
+// This sends debug data via UDP without affecting RS485 timing.
+// Useful for debugging when USB Serial would add latency.
+
+// UDP DEBUG - Uses CockpitOS debug console on port 4210
+#define UDP_DEBUG_ENABLE    1       // Set to 1 to enable UDP debug
+#define UDP_DEBUG_IP        "255.255.255.255"  // Broadcast to all
+#define UDP_DEBUG_PORT      4210    // CockpitOS debug port
+#define UDP_DEBUG_NAME      "RS485-MASTER"    // Device identifier in debug messages
+#define WIFI_SSID           "TestNetwork"
+#define WIFI_PASSWORD       "TestingOnly"
 
 // Broadcast chunking - prevents bus hogging during heavy export traffic
 #define MAX_BROADCAST_CHUNK  64      // Max bytes per broadcast burst
 
-// Maximum number of slaves per bus (addresses 1-127)
+// Slave address range to scan (1-127 valid, 0 is broadcast)
+#define MIN_SLAVE_ADDRESS   1       // First slave address to poll
+#define MAX_SLAVE_ADDRESS   1       // Last slave address to poll (set to 1 for single slave testing)
+
+// DEBUG: Suppress broadcasts to test if bus congestion is the issue
+// Set to 1 to disable all broadcasts (only polling will occur)
+#define SUPPRESS_BROADCASTS 1       // 0 = normal, 1 = disable broadcasts for testing
+
+// Internal array size - don't change
 #define MAX_SLAVES          128
 
 // ============================================================================
@@ -131,8 +156,90 @@
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
 
+#if UDP_DEBUG_ENABLE
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#endif
+
 // PC Serial - works on ALL ESP32 variants
 #define PC_SERIAL Serial
+
+// ============================================================================
+// UDP DEBUG CLASS - Non-blocking debug output via WiFi
+// ============================================================================
+
+#if UDP_DEBUG_ENABLE
+class UdpDebug {
+private:
+    WiFiUDP udp;
+    IPAddress targetIP;
+    bool connected;
+    char buffer[256];
+    unsigned long lastStatusTime;
+
+public:
+    UdpDebug() : connected(false), lastStatusTime(0) {}
+
+    void begin() {
+        WiFi.mode(WIFI_STA);
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        // Don't wait for connection - will check later
+        targetIP.fromString(UDP_DEBUG_IP);
+        connected = false;
+    }
+
+    void checkConnection() {
+        if (!connected && WiFi.status() == WL_CONNECTED) {
+            connected = true;
+            // Send registration/announcement packet
+            send("=== %s ONLINE === IP: %s", UDP_DEBUG_NAME, WiFi.localIP().toString().c_str());
+            lastStatusTime = millis();
+        }
+        // Periodic heartbeat every 30 seconds to show we're still alive
+        if (connected && (millis() - lastStatusTime) > 30000) {
+            send("[%s] heartbeat", UDP_DEBUG_NAME);
+            lastStatusTime = millis();
+        }
+    }
+
+    void send(const char* fmt, ...) {
+        if (!connected) return;
+
+        // Prefix with device name for easy identification
+        int pos = snprintf(buffer, sizeof(buffer), "[%s] ", UDP_DEBUG_NAME);
+
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(buffer + pos, sizeof(buffer) - pos, fmt, args);
+        va_end(args);
+
+        // Non-blocking UDP send
+        udp.beginPacket(targetIP, UDP_DEBUG_PORT);
+        udp.write((uint8_t*)buffer, strlen(buffer));
+        udp.endPacket();
+    }
+
+    void sendHex(const char* prefix, uint8_t* data, size_t len) {
+        if (!connected) return;
+
+        int pos = snprintf(buffer, sizeof(buffer), "[%s] %s: ", UDP_DEBUG_NAME, prefix);
+        for (size_t i = 0; i < len && pos < (int)sizeof(buffer) - 4; i++) {
+            pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%02X ", data[i]);
+        }
+
+        udp.beginPacket(targetIP, UDP_DEBUG_PORT);
+        udp.write((uint8_t*)buffer, strlen(buffer));
+        udp.endPacket();
+    }
+};
+
+UdpDebug udpDbg;
+#define UDP_DBG(fmt, ...) udpDbg.send(fmt, ##__VA_ARGS__)
+#define UDP_DBG_HEX(prefix, data, len) udpDbg.sendHex(prefix, data, len)
+#else
+#define UDP_DBG(fmt, ...)
+#define UDP_DBG_HEX(prefix, data, len)
+#endif
 
 // ============================================================================
 // FREERTOS TX TASK CONFIGURATION
@@ -239,7 +346,8 @@ public:
         : uartNum((uart_port_t)uartNum), txPin(txPin), rxPin(rxPin), dePin(dePin),
           state(STATE_IDLE), rxStartTime(0), rxtxLen(0), rxMsgType(0),
           txBusy(false), lastPollTime(0),
-          pollAddressCounter(1), scanAddressCounter(1), currentPollAddress(1),
+          pollAddressCounter(MIN_SLAVE_ADDRESS), scanAddressCounter(MIN_SLAVE_ADDRESS),
+          currentPollAddress(MIN_SLAVE_ADDRESS),
           next(nullptr)
     {
         // Add to linked list
@@ -259,13 +367,8 @@ public:
     }
 
     void init() {
-        // Select appropriate clock source for each ESP32 variant
-        // C3/C6/H2 use different clock constants than classic ESP32/S2/S3
-        #if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32H2
-            #define UART_CLK_SOURCE UART_SCLK_XTAL
-        #else
-            #define UART_CLK_SOURCE UART_SCLK_APB
-        #endif
+        // Use default clock source (must match Slave!)
+        #define UART_CLK_SOURCE UART_SCLK_DEFAULT
 
         uart_config_t uart_config = {
             .baud_rate = RS485_BAUD_RATE,
@@ -281,6 +384,15 @@ public:
                                              UART_TX_BUFFER_SIZE, 0, NULL, 0));
         ESP_ERROR_CHECK(uart_param_config(uartNum, &uart_config));
 
+#if RS485_DE_MANUAL
+        // Manual DE mode - use regular UART and control DE via GPIO
+        ESP_ERROR_CHECK(uart_set_pin(uartNum, txPin, rxPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+        ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_UART));
+        if (dePin >= 0) {
+            pinMode(dePin, OUTPUT);
+            digitalWrite(dePin, LOW);  // Start in RX mode
+        }
+#else
         if (dePin >= 0) {
             // Hardware RS485 mode with automatic DE control
             ESP_ERROR_CHECK(uart_set_pin(uartNum, txPin, rxPin, dePin, UART_PIN_NO_CHANGE));
@@ -290,29 +402,38 @@ public:
             ESP_ERROR_CHECK(uart_set_pin(uartNum, txPin, rxPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
             ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_UART));
         }
+#endif
 
         uart_flush_input(uartNum);
         state = STATE_IDLE;
         lastPollTime = esp_timer_get_time();
     }
 
+    int getDePin() const { return dePin; }
+
     void advancePollAddress() {
-        pollAddressCounter = (pollAddressCounter + 1) % MAX_SLAVES;
-        while (!slavePresent[pollAddressCounter]) {
-            pollAddressCounter = (pollAddressCounter + 1) % MAX_SLAVES;
+        // Advance through address range, wrapping at MAX_SLAVE_ADDRESS
+        pollAddressCounter++;
+        if (pollAddressCounter > MAX_SLAVE_ADDRESS) {
+            pollAddressCounter = MIN_SLAVE_ADDRESS;
         }
 
-        if (pollAddressCounter == 0) {
-            scanAddressCounter = (scanAddressCounter + 1) % MAX_SLAVES;
-            while (slavePresent[scanAddressCounter]) {
-                scanAddressCounter = (scanAddressCounter + 1) % MAX_SLAVES;
-                if (scanAddressCounter == 0) {
-                    currentPollAddress = 1;
-                    return;
-                }
+        // Skip to next known slave (for efficiency with large address ranges)
+        uint8_t startAddr = pollAddressCounter;
+        while (!slavePresent[pollAddressCounter]) {
+            pollAddressCounter++;
+            if (pollAddressCounter > MAX_SLAVE_ADDRESS) {
+                pollAddressCounter = MIN_SLAVE_ADDRESS;
             }
-            currentPollAddress = scanAddressCounter;
-            return;
+            if (pollAddressCounter == startAddr) {
+                // No known slaves - scan for new ones
+                scanAddressCounter++;
+                if (scanAddressCounter > MAX_SLAVE_ADDRESS) {
+                    scanAddressCounter = MIN_SLAVE_ADDRESS;
+                }
+                currentPollAddress = scanAddressCounter;
+                return;
+            }
         }
         currentPollAddress = pollAddressCounter;
     }
@@ -378,10 +499,18 @@ public:
 
         switch (state) {
             case STATE_IDLE:
+#if !SUPPRESS_BROADCASTS
+                // Only send broadcasts if not suppressed
                 if (exportData.isNotEmpty() && (now - lastPollTime) < MAX_POLL_INTERVAL_US) {
                     sendBroadcast();
                     return;
                 }
+#else
+                // Broadcasts suppressed - just discard any export data
+                while (exportData.isNotEmpty()) {
+                    exportData.get();
+                }
+#endif
                 if (messageBuffer.isEmpty() && !messageBuffer.complete) {
                     advancePollAddress();
                     sendPoll(currentPollAddress);
@@ -399,6 +528,7 @@ public:
                 if (!txBusy) {
                     rxStartTime = esp_timer_get_time();
                     state = STATE_RX_WAIT_DATALENGTH;
+                    // Don't log every poll - too spammy during scanning
                 }
                 break;
 
@@ -410,6 +540,7 @@ public:
 
             case STATE_RX_WAIT_DATALENGTH:
                 if ((now - rxStartTime) > POLL_TIMEOUT_US) {
+                    // Don't log normal timeouts - too spammy
                     slavePresent[currentPollAddress] = false;
                     sendTimeoutZeroByte();
                     return;
@@ -422,9 +553,14 @@ public:
                         uart_read_bytes(uartNum, &c, 1, 0);
                         rxtxLen = c;
                         slavePresent[currentPollAddress] = true;
-                        if (rxtxLen > 0) {
+                        // Only log valid-looking responses (len <= 64)
+                        if (rxtxLen > 0 && rxtxLen <= 64) {
+                            UDP_DBG("RX_START addr=%d len=%d", currentPollAddress, rxtxLen);
                             state = STATE_RX_WAIT_MSGTYPE;
                             rxStartTime = now;
+                        } else if (rxtxLen > 64) {
+                            // Garbage length - don't spam, just go back to idle
+                            state = STATE_IDLE;
                         } else {
                             state = STATE_IDLE;
                         }
@@ -434,9 +570,8 @@ public:
 
             case STATE_RX_WAIT_MSGTYPE:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
+                    // Timeout - don't spam debug
                     messageBuffer.clear();
-                    messageBuffer.put('\n');
-                    messageBuffer.complete = true;
                     state = STATE_IDLE;
                     return;
                 }
@@ -454,9 +589,8 @@ public:
 
             case STATE_RX_WAIT_DATA:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
+                    // Timeout - don't spam debug
                     messageBuffer.clear();
-                    messageBuffer.put('\n');
-                    messageBuffer.complete = true;
                     state = STATE_IDLE;
                     return;
                 }
@@ -478,9 +612,8 @@ public:
 
             case STATE_RX_WAIT_CHECKSUM:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
+                    // Timeout - don't spam debug
                     messageBuffer.clear();
-                    messageBuffer.put('\n');
-                    messageBuffer.complete = true;
                     state = STATE_IDLE;
                     return;
                 }
@@ -491,6 +624,7 @@ public:
                         uint8_t c;
                         uart_read_bytes(uartNum, &c, 1, 0);
                         (void)c;  // Checksum ignored (like AVR)
+                        UDP_DBG("RX_OK addr=%d len=%d", currentPollAddress, messageBuffer.getLength());
                         messageBuffer.complete = true;
                         state = STATE_IDLE;
                     }
@@ -532,18 +666,56 @@ static void txTask(void* param) {
 
     while (true) {
         if (xQueueReceive(txQueue, &request, portMAX_DELAY) == pdTRUE) {
+            // Find the bus that owns this UART
+            RS485Master* bus = RS485Master::first;
+            while (bus != nullptr) {
+                if (bus->getUartNum() == request.uartNum) {
+                    break;
+                }
+                bus = bus->next;
+            }
+
+            // Flush any stale data from RX buffer BEFORE sending
+            // This clears leftover data from previous cycles
+            uart_flush_input(request.uartNum);
+
+#if RS485_DE_MANUAL
+            // Manual DE control - assert before TX (matches AVR set_txen behavior)
+            if (bus && bus->getDePin() >= 0) {
+                digitalWrite(bus->getDePin(), HIGH);  // Enable transmitter
+            }
+#endif
+
             // Send on the specified UART
             uart_write_bytes(request.uartNum, (const char*)request.data, request.length);
             uart_wait_tx_done(request.uartNum, pdMS_TO_TICKS(50));
 
-            // Find the bus that owns this UART and clear its txBusy flag
-            RS485Master* bus = RS485Master::first;
-            while (bus != nullptr) {
-                if (bus->getUartNum() == request.uartNum) {
-                    bus->clearTxBusy();
-                    break;
-                }
-                bus = bus->next;
+#if RS485_DE_MANUAL
+            // Manual DE control - release after TX (matches AVR clear_txen behavior)
+            if (bus && bus->getDePin() >= 0) {
+                delayMicroseconds(10);  // Ensure stop bit completes
+                digitalWrite(bus->getDePin(), LOW);   // Enable receiver
+            }
+
+            // Discard echo bytes - we receive our own TX in manual mode
+            // Wait for echo bytes to arrive, then discard exactly what we sent
+            delayMicroseconds(100);
+            uint8_t discardBuf[32];
+            size_t available = 0;
+            uart_get_buffered_data_len(request.uartNum, &available);
+            // Read and discard up to request.length (our echo) - don't read more!
+            size_t toDiscard = (available > request.length) ? request.length : available;
+            if (toDiscard > 0) {
+                uart_read_bytes(request.uartNum, discardBuf, toDiscard, 0);
+            }
+#endif
+
+            // Small turnaround delay
+            delayMicroseconds(50);
+
+            // Clear txBusy flag
+            if (bus) {
+                bus->clearTxBusy();
             }
         }
     }
@@ -596,6 +768,12 @@ void setup() {
     PC_SERIAL.begin(250000);
     delay(100);
 
+#if UDP_DEBUG_ENABLE
+    // Initialize WiFi for UDP debug (non-blocking)
+    udpDbg.begin();
+    PC_SERIAL.println("UDP Debug: Connecting to WiFi...");
+#endif
+
     // Create shared TX queue
     txQueue = xQueueCreate(TX_QUEUE_LENGTH, sizeof(TxRequest));
     if (txQueue == NULL) {
@@ -622,6 +800,11 @@ void setup() {
 }
 
 void loop() {
+#if UDP_DEBUG_ENABLE
+    // Check WiFi connection status (non-blocking)
+    udpDbg.checkConnection();
+#endif
+
     // Read export data from PC (distributes to all buses)
     processPCInput();
 
