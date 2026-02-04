@@ -797,14 +797,19 @@ static void initRS485Hardware() {
                                   UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     Serial.println("  [5] UART pins set OK");
 
-    Serial.println("  [6] Disabling default RX interrupt...");
-    // Disable driver's default ISR handling
-    ESP_ERROR_CHECK(uart_disable_rx_intr((uart_port_t)RS485_UART_NUM));
-    Serial.println("  [6] Default RX interrupt disabled OK");
-
     // =========================================================================
     // Register our own ISR for immediate response
+    // Use uart_isr_register() which properly replaces the driver's ISR
     // =========================================================================
+
+    Serial.println("  [6] Registering custom UART ISR...");
+    // This frees the driver's ISR and registers our own
+    ESP_ERROR_CHECK(uart_isr_free((uart_port_t)RS485_UART_NUM));
+    ESP_ERROR_CHECK(uart_isr_register((uart_port_t)RS485_UART_NUM,
+                                       uart_isr_handler, NULL,
+                                       ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL1,
+                                       &uartIntrHandle));
+    Serial.println("  [6] Custom UART ISR registered OK");
 
     Serial.println("  [7] Setting RX FIFO threshold...");
     // Configure RX FIFO threshold - trigger on every byte for lowest latency
@@ -815,13 +820,6 @@ static void initRS485Hardware() {
     // Enable RX FIFO full interrupt
     uart_ll_ena_intr_mask(uartHw, UART_INTR_RXFIFO_FULL);
     Serial.println("  [8] RX FIFO interrupt enabled OK");
-
-    Serial.println("  [9] Allocating custom ISR...");
-    // Allocate and register ISR using the peripheral signal table
-    ESP_ERROR_CHECK(esp_intr_alloc(uart_periph_signal[RS485_UART_NUM].irq,
-                                    ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL3,
-                                    uart_isr_handler, NULL, &uartIntrHandle));
-    Serial.println("  [9] Custom ISR allocated OK");
 
     rs485State = STATE_SYNC;
     lastRxTime = esp_timer_get_time();
