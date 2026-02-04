@@ -33,13 +33,16 @@
 #define MESSAGE_BUFFER_SIZE    64
 
 // ============================================================================
-// TIMING CONFIGURATION - Tweak these to debug corruption issues
+// TIMING CONFIGURATION
 // ============================================================================
-#define SYNC_TIMEOUT_US      500    // 500µs silence = sync detected
-#define RX_TIMEOUT_SYMBOLS   10    // UART RX timeout in bit periods. Was 12, why? check AVR and protocol, whats the optimal value based on protocol and 250000 baud rate?
-#define PRE_TX_DELAY_US       0     // Delay after DE high, before first byte. Setting to 1000 makes slave send blanks, setting to 0 works
-#define FRAME_TIMEOUT_US      0     // Reset if stuck mid-frame (0 = disabled)
-#define POST_TX_DELAY_US      0     // Any delay here causes the slave to send blanks.. why?
+#define SYNC_TIMEOUT_US      500    // 500µs silence = sync (matches AVR)
+#define FRAME_TIMEOUT_US     0      // 0 = disabled (AVR has none)
+
+// RX_TIMEOUT_SYMBOLS: UART driver signals "data ready" after this many idle bit-times.
+// At 250kbaud: 1 bit = 4µs, so 10 symbols = 40µs ≈ 1 byte time.
+// AVR doesn't use this (interrupt-driven per byte), but ESP32 driver needs it.
+// Range 1-127. Lower = faster response, higher = more tolerance for jitter.
+#define RX_TIMEOUT_SYMBOLS   10
 
 // ============================================================================
 // DEBUG OPTIONS
@@ -572,7 +575,7 @@ static void initRS485Hardware() {
 }
 
 // ============================================================================
-// TX HANDLING - DIRECT FIFO ACCESS WITH CRITICAL SECTION
+// TX HANDLING - AVR-STYLE UART PRIMING
 // ============================================================================
 
 // Spinlock for critical sections - prevents WiFi/radio ISRs from corrupting TX timing
@@ -592,6 +595,17 @@ static void writeToFifo(const uint8_t* data, size_t len) {
     }
 }
 
+// Prime the UART transmitter (like AVR's tx_delay_byte)
+// Sends a dummy byte with DE LOW to "exercise" the UART hardware
+// before enabling DE and sending real data
+static void primeUartTransmitter() {
+    uint8_t dummy = 0x00;
+    writeToFifo(&dummy, 1);
+    while (!uart_ll_is_tx_idle(uartHw)) {
+        // Wait for dummy byte to fully transmit (with DE low, doesn't go on bus)
+    }
+}
+
 static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
     uint8_t len = messageBuffer.getLength();
@@ -608,15 +622,20 @@ static void sendResponse() {
     size_t totalBytes = 3 + len;
 
     // =========================================================================
-    // CRITICAL SECTION: Disable ALL interrupts during TX
-    // Uses direct FIFO writes - uart_write_bytes() uses FreeRTOS semaphores
-    // which CANNOT be called inside critical sections!
+    // CRITICAL SECTION with AVR-style UART priming:
+    // 1. Prime UART with dummy byte (DE LOW - doesn't go on bus)
+    // 2. Enable DE
+    // 3. Send real data
+    // 4. Wait for TX complete
+    // 5. Disable DE
     // =========================================================================
     portENTER_CRITICAL(&txMutex);
 
+    // AVR-style: prime UART transmitter with DE still LOW
+    primeUartTransmitter();
+
 #if RS485_DE_PIN >= 0
-    setDE(true);
-    delayMicroseconds(PRE_TX_DELAY_US);  // Configurable pre-TX delay
+    setDE(true);  // NOW enable DE after UART is "warmed up"
 #endif
 
     // Direct FIFO write - no FreeRTOS calls
@@ -626,8 +645,6 @@ static void sendResponse() {
     while (!uart_ll_is_tx_idle(uartHw)) {
         // Spin until last bit shifted out
     }
-
-    delayMicroseconds(POST_TX_DELAY_US);  // Configurable post-TX delay
 
 #if RS485_DE_PIN >= 0
     setDE(false);  // Return to RX mode
@@ -657,9 +674,11 @@ static void sendZeroLengthResponse() {
 
     portENTER_CRITICAL(&txMutex);
 
+    // AVR-style: prime UART transmitter with DE still LOW
+    primeUartTransmitter();
+
 #if RS485_DE_PIN >= 0
     setDE(true);
-    delayMicroseconds(PRE_TX_DELAY_US);
 #endif
 
     writeToFifo(&response, 1);
@@ -667,8 +686,6 @@ static void sendZeroLengthResponse() {
     while (!uart_ll_is_tx_idle(uartHw)) {
         // Spin until last bit shifted out
     }
-
-    delayMicroseconds(POST_TX_DELAY_US);
 
 #if RS485_DE_PIN >= 0
     setDE(false);
