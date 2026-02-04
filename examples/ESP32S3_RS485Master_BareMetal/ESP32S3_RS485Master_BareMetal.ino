@@ -94,7 +94,7 @@
 
 // Timing Constants (microseconds)
 #define POLL_TIMEOUT_US      1000    // 1ms - timeout waiting for slave response
-#define RX_TIMEOUT_US        5000    // 5ms - timeout for complete message
+#define RX_TIMEOUT_US        20000   // 20ms - timeout for complete message (was 5ms)
 #define SYNC_TIMEOUT_US      500     // 500µs silence = sync
 #define MAX_POLL_INTERVAL_US 2000    // Ensure we poll at least every 2ms
 
@@ -546,8 +546,10 @@ public:
             case STATE_RX_WAIT_MSGTYPE:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
                     UDP_DBG("RX_ERR addr=%d timeout waiting for msgtype", currentPollAddress);
+                    // Send visible error marker instead of blank line
+                    const char* err1 = "[ERR:MSGTYPE]\n";
                     messageBuffer.clear();
-                    messageBuffer.put('\n');
+                    while (*err1) messageBuffer.put(*err1++);
                     messageBuffer.complete = true;
                     state = STATE_IDLE;
                     return;
@@ -567,8 +569,10 @@ public:
             case STATE_RX_WAIT_DATA:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
                     UDP_DBG("RX_ERR addr=%d timeout waiting for data, remaining=%d", currentPollAddress, rxtxLen);
+                    // Send visible error marker instead of blank line
+                    const char* err2 = "[ERR:DATA]\n";
                     messageBuffer.clear();
-                    messageBuffer.put('\n');
+                    while (*err2) messageBuffer.put(*err2++);
                     messageBuffer.complete = true;
                     state = STATE_IDLE;
                     return;
@@ -592,8 +596,10 @@ public:
             case STATE_RX_WAIT_CHECKSUM:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
                     UDP_DBG("RX_ERR addr=%d timeout waiting for checksum", currentPollAddress);
+                    // Send visible error marker instead of blank line
+                    const char* err3 = "[ERR:CHECKSUM]\n";
                     messageBuffer.clear();
-                    messageBuffer.put('\n');
+                    while (*err3) messageBuffer.put(*err3++);
                     messageBuffer.complete = true;
                     state = STATE_IDLE;
                     return;
