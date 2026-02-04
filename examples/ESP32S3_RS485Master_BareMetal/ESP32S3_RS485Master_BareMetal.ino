@@ -65,7 +65,7 @@
 // BUS 1 - Primary RS485 bus (enabled by default)
 #define BUS1_TX_PIN     17
 #define BUS1_RX_PIN     18
-#define BUS1_DE_PIN     21      // Set to -1 for auto-direction transceiver
+#define BUS1_DE_PIN     -1      // -1 = auto-direction mode (board may have built-in auto-dir)
 #define BUS1_UART_NUM   1       // UART1
 
 // DE Control Mode - Try MANUAL (1) if hardware RS485 mode has issues with your transceiver
