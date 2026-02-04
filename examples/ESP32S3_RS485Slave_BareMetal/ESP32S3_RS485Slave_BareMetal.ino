@@ -41,6 +41,8 @@
 #define FRAME_TIMEOUT_US      0     // Reset if stuck mid-frame (0 = disabled)
 #define POST_TX_DELAY_US      0     // Any delay here causes the slave to send blanks.. why?
 
+#define MICRODELAY  0
+
 // ============================================================================
 // DEBUG OPTIONS
 // ============================================================================
@@ -616,7 +618,7 @@ static void sendResponse() {
     setDE(true);
     // Small delay to let transceiver fully enable before first bit
     // The MAX13488E needs ~30ns, but GPIO + bus settling might need more
-    delayMicroseconds(2);
+    delayMicroseconds(MICRODELAY);
 #endif
 
     // Transmit byte-by-byte, waiting for each to complete (like AVR ISR)
@@ -652,7 +654,7 @@ static void sendZeroLengthResponse() {
 
 #if RS485_DE_PIN >= 0
     setDE(true);
-    delayMicroseconds(2);  // Let transceiver enable
+    delayMicroseconds(MICRODELAY);  // Let transceiver enable
 #endif
 
     txByte(0);  // Zero-length response
