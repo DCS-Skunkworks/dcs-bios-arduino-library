@@ -852,7 +852,6 @@ static void sendResponse() {
     size_t totalBytes = 3 + len;
 
     // Small turnaround delay before TX (AVR uses tx_delay_byte = ~40µs)
-    // This gives the bus time to settle after receiving the poll
     delayMicroseconds(50);
 
     // TX - hardware or auto-direction handles the rest
@@ -878,20 +877,14 @@ static void sendResponse() {
         uart_flush_input(uartNum);
     }
 
-    // Log if echo count doesn't match TX count
-    if (echo1 != totalBytes || echo2 > 0) {
-        DBGF("[TX %d] echo=%d stray=%d first=[%02X %02X %02X] last=[%02X]\n",
-             totalBytes, echo1, echo2,
-             echoRead > 0 ? echoBuf[0] : 0,
-             echoRead > 1 ? echoBuf[1] : 0,
-             echoRead > 2 ? echoBuf[2] : 0,
-             echoRead > 0 ? echoBuf[echoRead-1] : 0);
-    }
-
     // Clear message buffer and return to RX state
     messageBuffer.clear();
     messageBuffer.complete = false;
     rs485State = STATE_RX_WAIT_ADDRESS;
+
+    // Log AFTER TX complete (so UDP doesn't interfere with RS485 timing)
+    DBGF("[TX] len=%d echo=%d stray=%d pkt=[%02X %02X %02X...%02X]\n",
+         len, echo1, echo2, packet[0], packet[1], packet[2], packet[totalBytes-1]);
 }
 
 /**
