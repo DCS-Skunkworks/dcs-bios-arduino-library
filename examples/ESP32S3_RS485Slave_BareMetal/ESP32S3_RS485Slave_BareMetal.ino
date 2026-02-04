@@ -815,8 +815,8 @@ static void initRS485Hardware() {
     // Add idle symbols BEFORE TX data starts. This gives the auto-direction
     // transceiver time to detect TX activity and switch to TX mode before
     // the actual data bits arrive. Without this, the first byte gets corrupted.
-    // At 250kbaud: 1 symbol = 40µs. 3 symbols = 120µs idle before data.
-    uart_set_tx_idle_num(uartNum, 3);
+    // At 250kbaud: 1 symbol = 40µs. 10 symbols = 400µs idle before data.
+    uart_set_tx_idle_num(uartNum, 10);
 
     // =========================================================================
     // RX TIMEOUT CONFIGURATION
