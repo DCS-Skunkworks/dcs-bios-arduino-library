@@ -882,9 +882,16 @@ static void sendResponse() {
     messageBuffer.complete = false;
     rs485State = STATE_RX_WAIT_ADDRESS;
 
-    // Log AFTER TX complete (so UDP doesn't interfere with RS485 timing)
-    DBGF("[TX] len=%d echo=%d stray=%d pkt=[%02X %02X %02X...%02X]\n",
-         len, echo1, echo2, packet[0], packet[1], packet[2], packet[totalBytes-1]);
+    // Log AFTER TX complete - show echo bytes when present
+    if (echo1 > 0 || echo2 > 0) {
+        DBGF("[TX] len=%d echo=%d[%02X %02X %02X %02X] stray=%d\n",
+             len, echo1,
+             echoRead > 0 ? echoBuf[0] : 0,
+             echoRead > 1 ? echoBuf[1] : 0,
+             echoRead > 2 ? echoBuf[2] : 0,
+             echoRead > 3 ? echoBuf[3] : 0,
+             echo2);
+    }
 }
 
 /**
