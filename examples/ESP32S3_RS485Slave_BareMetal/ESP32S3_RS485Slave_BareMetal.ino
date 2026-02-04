@@ -120,7 +120,7 @@
 // This sends debug data via UDP without affecting RS485 timing.
 // Set UDP_DEBUG_ENABLE to 1 and configure WiFi to use.
 
-#define UDP_DEBUG_ENABLE    1       // Set to 1 to enable UDP debug (0 = disabled for best timing)
+#define UDP_DEBUG_ENABLE    0       // Set to 1 to enable UDP debug (0 = disabled for best timing)
 #define UDP_DEBUG_IP        "255.255.255.255"  // Broadcast to all
 #define UDP_DEBUG_PORT      4210    // CockpitOS debug port
 #define UDP_DEBUG_NAME      "RS485-SLAVE"     // Device identifier in debug messages
@@ -851,10 +851,7 @@ static void sendResponse() {
 
     size_t totalBytes = 3 + len;
 
-    // Small turnaround delay before TX (AVR uses tx_delay_byte = ~40µs)
-    delayMicroseconds(50);
-
-    // TX - hardware or auto-direction handles the rest
+    // TX immediately - matches OLD working version (no turnaround delay)
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
 
@@ -874,10 +871,7 @@ static void sendResponse() {
 static void sendZeroLengthResponse() {
     uint8_t response = 0;
 
-    // Small turnaround delay before TX
-    delayMicroseconds(50);
-
-    // TX - hardware or auto-direction handles the rest
+    // TX immediately - matches OLD working version
     uart_write_bytes(uartNum, (const char*)&response, 1);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
 
