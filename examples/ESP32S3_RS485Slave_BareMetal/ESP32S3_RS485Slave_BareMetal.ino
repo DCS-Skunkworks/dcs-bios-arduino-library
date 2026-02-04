@@ -98,7 +98,7 @@
 // 0 = Hardware RS485 mode (ESP32 controls DE automatically via RTS)
 // 1 = Manual GPIO mode (we control DE pin explicitly - more compatible)
 // Note: Ignored when RS485_DE_PIN = -1 (auto-direction mode)
-#define RS485_DE_MANUAL 0
+#define RS485_DE_MANUAL 1
 
 // UART Configuration
 #define RS485_UART_NUM  1        // UART1 (UART0 is typically used for USB/debug)
@@ -889,18 +889,20 @@ static void sendResponse() {
                txSeqNum, len, totalBytes, hexBuf, ascBuf);
 #endif
 
+    // Assert DE before TX (for manual DE control mode)
+    deAssert();
+
     // TX immediately - matches OLD working version (no turnaround delay)
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
+
+    // Release DE after TX complete (for manual DE control mode)
+    deRelease();
 
 #if UDP_DEBUG_ENABLE
     int64_t txEndTime = esp_timer_get_time();
     udpDbgSend("TX#%lu DONE dt=%lldus", txSeqNum, txEndTime - txStartTime);
 #endif
-
-    // NO ECHO HANDLING - auto-direction transceiver suppresses echo
-    // The bytes we were seeing were NOT echo - they were the next
-    // broadcast (export data) from the Master that we were accidentally flushing!
 
     // Clear message buffer and return to RX state
     messageBuffer.clear();
@@ -914,11 +916,15 @@ static void sendResponse() {
 static void sendZeroLengthResponse() {
     uint8_t response = 0;
 
+    // Assert DE before TX (for manual DE control mode)
+    deAssert();
+
     // TX immediately - matches OLD working version
     uart_write_bytes(uartNum, (const char*)&response, 1);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
 
-    // NO ECHO HANDLING - auto-direction transceiver suppresses echo
+    // Release DE after TX complete (for manual DE control mode)
+    deRelease();
 
     rs485State = STATE_RX_WAIT_ADDRESS;
 }
