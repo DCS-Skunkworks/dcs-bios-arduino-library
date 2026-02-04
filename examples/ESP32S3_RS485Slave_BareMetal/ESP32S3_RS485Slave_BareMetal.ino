@@ -120,7 +120,7 @@
 // This sends debug data via UDP without affecting RS485 timing.
 // Set UDP_DEBUG_ENABLE to 1 and configure WiFi to use.
 
-#define UDP_DEBUG_ENABLE    0       // Set to 1 to enable UDP debug (0 = disabled for best timing)
+#define UDP_DEBUG_ENABLE    1       // Set to 1 to enable UDP debug (0 = disabled for best timing)
 #define UDP_DEBUG_IP        "255.255.255.255"  // Broadcast to all
 #define UDP_DEBUG_PORT      4210    // CockpitOS debug port
 #define UDP_DEBUG_NAME      "RS485-SLAVE"     // Device identifier in debug messages
@@ -859,18 +859,33 @@ static void sendResponse() {
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
 
-    // Wait for ALL echo bytes to arrive before flushing
-    // At 250kbaud: 1 byte = 40µs. Last byte needs 40µs to fully receive.
-    // Add margin for transceiver latency and UART driver buffering.
+    // Read echo bytes (don't just flush - capture them for analysis)
     delayMicroseconds(200);
-    uart_flush_input(uartNum);
+    size_t echo1 = 0;
+    uart_get_buffered_data_len(uartNum, &echo1);
 
-    // Paranoid check: if anything arrived during flush, wait and flush again
-    size_t stray = 0;
-    uart_get_buffered_data_len(uartNum, &stray);
-    if (stray > 0) {
-        delayMicroseconds(50);
+    uint8_t echoBuf[32];
+    size_t echoRead = 0;
+    if (echo1 > 0) {
+        echoRead = uart_read_bytes(uartNum, echoBuf, (echo1 < 32) ? echo1 : 32, 0);
+    }
+
+    // Check for stray bytes
+    delayMicroseconds(50);
+    size_t echo2 = 0;
+    uart_get_buffered_data_len(uartNum, &echo2);
+    if (echo2 > 0) {
         uart_flush_input(uartNum);
+    }
+
+    // Log if echo count doesn't match TX count
+    if (echo1 != totalBytes || echo2 > 0) {
+        DBGF("[TX %d] echo=%d stray=%d first=[%02X %02X %02X] last=[%02X]\n",
+             totalBytes, echo1, echo2,
+             echoRead > 0 ? echoBuf[0] : 0,
+             echoRead > 1 ? echoBuf[1] : 0,
+             echoRead > 2 ? echoBuf[2] : 0,
+             echoRead > 0 ? echoBuf[echoRead-1] : 0);
     }
 
     // Clear message buffer and return to RX state
