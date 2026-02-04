@@ -120,7 +120,7 @@
 // This sends debug data via UDP without affecting RS485 timing.
 // Set UDP_DEBUG_ENABLE to 1 and configure WiFi to use.
 
-#define UDP_DEBUG_ENABLE    1       // Set to 1 to enable UDP debug (0 = disabled for best timing)
+#define UDP_DEBUG_ENABLE    0       // Set to 1 to enable UDP debug (0 = disabled for best timing)
 #define UDP_DEBUG_IP        "255.255.255.255"  // Broadcast to all
 #define UDP_DEBUG_PORT      4210    // CockpitOS debug port
 #define UDP_DEBUG_NAME      "RS485-SLAVE"     // Device identifier in debug messages
