@@ -50,6 +50,7 @@
 #include <hal/gpio_ll.h>
 #include <soc/uart_struct.h>
 #include <soc/gpio_struct.h>
+#include <soc/uart_periph.h>
 #include <esp_timer.h>
 #include <esp_intr_alloc.h>
 
@@ -796,8 +797,8 @@ static void initRS485Hardware() {
     // Enable RX FIFO full interrupt
     uart_ll_ena_intr_mask(uartHw, UART_INTR_RXFIFO_FULL);
 
-    // Allocate and register ISR
-    ESP_ERROR_CHECK(esp_intr_alloc(ETS_UART1_INTR_SOURCE,
+    // Allocate and register ISR using the peripheral signal table
+    ESP_ERROR_CHECK(esp_intr_alloc(uart_periph_signal[RS485_UART_NUM].irq,
                                     ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL3,
                                     uart_isr_handler, NULL, &uartIntrHandle));
 
