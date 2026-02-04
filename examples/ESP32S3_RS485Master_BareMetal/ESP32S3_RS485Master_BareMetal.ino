@@ -363,13 +363,9 @@ public:
     }
 
     void init() {
-        // Select appropriate clock source for each ESP32 variant
-        // C3/C6/H2 use different clock constants than classic ESP32/S2/S3
-        #if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32H2
-            #define UART_CLK_SOURCE UART_SCLK_XTAL
-        #else
-            #define UART_CLK_SOURCE UART_SCLK_APB
-        #endif
+        // Use crystal clock for accurate baud rate (must match Slave!)
+        // XTAL is more accurate than APB (PLL-derived) across devices
+        #define UART_CLK_SOURCE UART_SCLK_XTAL
 
         uart_config_t uart_config = {
             .baud_rate = RS485_BAUD_RATE,
