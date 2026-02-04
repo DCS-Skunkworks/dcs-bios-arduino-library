@@ -907,32 +907,55 @@ static void processExportData() {
 }
 
 // ============================================================================
-// INPUT/OUTPUT CLASSES
+// INPUT/OUTPUT CLASSES (AVR-style with proper debounce)
 // ============================================================================
+
+#define POLL_EVERY_TIME 0
 
 class Switch2Pos : public PollingInput {
 private:
     const char* msg;
     uint8_t pin;
-    bool lastState;
+    int8_t lastState;           // Last state sent to DCS
+    int8_t debounceSteadyState; // Current debounce tracking state
+    bool reverse;
+    unsigned long debounceDelay;
+    unsigned long lastDebounceTime;
 
     void resetState() override {
-        lastState = !digitalRead(pin);
+        lastState = (lastState == 0) ? -1 : 0;  // Force re-send on next stable read
     }
 
     void pollInput() override {
-        bool state = !digitalRead(pin);
-        if (state != lastState) {
-            if (tryToSendDcsBiosMessage(msg, state ? "1" : "0")) {
-                lastState = state;
+        int8_t state = digitalRead(pin);
+        if (reverse) state = !state;
+
+        unsigned long now = millis();
+
+        // If state changed, reset debounce timer
+        if (state != debounceSteadyState) {
+            lastDebounceTime = now;
+            debounceSteadyState = state;
+        }
+
+        // Only act if state has been stable for debounce period
+        if ((now - lastDebounceTime) >= debounceDelay) {
+            if (debounceSteadyState != lastState) {
+                if (tryToSendDcsBiosMessage(msg, state == HIGH ? "0" : "1")) {
+                    lastState = debounceSteadyState;
+                }
             }
         }
     }
 
 public:
-    Switch2Pos(const char* msg, uint8_t pin, bool reversePolarity = false)
-        : PollingInput(50), msg(msg), pin(pin), lastState(false) {
+    Switch2Pos(const char* msg, uint8_t pin, bool reverse = false, unsigned long debounceDelay = 50)
+        : PollingInput(POLL_EVERY_TIME), msg(msg), pin(pin), reverse(reverse),
+          debounceDelay(debounceDelay), lastDebounceTime(0) {
         pinMode(pin, INPUT_PULLUP);
+        lastState = digitalRead(pin);
+        if (reverse) lastState = !lastState;
+        debounceSteadyState = lastState;
     }
 };
 
