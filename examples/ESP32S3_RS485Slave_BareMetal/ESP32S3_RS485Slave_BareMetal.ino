@@ -38,6 +38,13 @@
 #define SYNC_TIMEOUT_US      500    // 500µs silence = sync detected
 
 // ============================================================================
+// TX MODE SELECTION - For A/B testing
+// ============================================================================
+// 0 = Buffered mode: Build response in buffer, write all at once to FIFO
+// 1 = Byte-by-byte mode: Write each byte individually, wait for FIFO space
+#define TX_MODE_BYTE_BY_BYTE    0
+
+// ============================================================================
 // DEBUG OPTIONS
 // ============================================================================
 #define UDP_DEBUG_ENABLE    0
@@ -552,9 +559,36 @@ static inline void IRAM_ATTR deStabilizationDelay() {
     for (volatile int i = 0; i < 120; i++) { __asm__ __volatile__("nop"); }
 }
 
+// Helper: write one byte and wait for FIFO space (not full idle)
+static inline void IRAM_ATTR txByteWaitFifo(uint8_t b) {
+    // Wait until FIFO has space (not waiting for complete idle - faster)
+    while (uart_ll_get_txfifo_len(uartHw) >= 127);
+    uart_ll_write_txfifo(uartHw, &b, 1);
+}
+
 static void IRAM_ATTR sendResponseISR() {
     uint8_t len = messageBuffer.getLengthISR();
 
+    // Disable RX interrupt during TX to prevent echo bytes triggering ISR
+    uart_ll_disable_intr_mask(uartHw, UART_INTR_RXFIFO_FULL);
+
+    // Enable driver and let it stabilize
+    setDE_ISR(true);
+    deStabilizationDelay();
+
+#if TX_MODE_BYTE_BY_BYTE
+    // === BYTE-BY-BYTE MODE ===
+    // Send each byte individually, wait for FIFO space between bytes
+    txByteWaitFifo(len);         // Length byte
+    txByteWaitFifo(0);           // MsgType = 0
+
+    for (uint8_t i = 0; i < len; i++) {
+        txByteWaitFifo(messageBuffer.getISR());
+    }
+
+    txByteWaitFifo(0x72);        // Checksum
+#else
+    // === BUFFERED MODE ===
     // Build complete response in local buffer for continuous transmission
     uint8_t txBuf[MESSAGE_BUFFER_SIZE + 4];  // len + msgtype + data + checksum
     uint8_t txLen = 0;
@@ -562,21 +596,17 @@ static void IRAM_ATTR sendResponseISR() {
     txBuf[txLen++] = len;        // Length byte
     txBuf[txLen++] = 0;          // MsgType = 0
 
-    // Copy data from message buffer
     for (uint8_t i = 0; i < len; i++) {
         txBuf[txLen++] = messageBuffer.getISR();
     }
 
     txBuf[txLen++] = 0x72;       // Checksum
 
-    // Enable driver and let it stabilize
-    setDE_ISR(true);
-    deStabilizationDelay();
-
     // Send entire buffer at once - FIFO is 128 bytes, plenty for our messages
     uart_ll_write_txfifo(uartHw, txBuf, txLen);
+#endif
 
-    // Wait for transmission to complete
+    // Wait for transmission to fully complete
     while (!uart_ll_is_tx_idle(uartHw));
 
     // Disable driver
@@ -584,6 +614,10 @@ static void IRAM_ATTR sendResponseISR() {
 
     // Flush RX FIFO (echo bytes)
     uart_ll_rxfifo_rst(uartHw);
+
+    // Re-enable RX interrupt
+    uart_ll_clr_intsts_mask(uartHw, UART_INTR_RXFIFO_FULL);
+    uart_ll_ena_intr_mask(uartHw, UART_INTR_RXFIFO_FULL);
 
     // Clear message buffer
     messageBuffer.clearISR();
@@ -593,6 +627,9 @@ static void IRAM_ATTR sendResponseISR() {
 
 static void IRAM_ATTR sendZeroLengthResponseISR() {
     uint8_t zero = 0;
+
+    // Disable RX interrupt during TX
+    uart_ll_disable_intr_mask(uartHw, UART_INTR_RXFIFO_FULL);
 
     // Enable driver and let it stabilize
     setDE_ISR(true);
@@ -609,6 +646,10 @@ static void IRAM_ATTR sendZeroLengthResponseISR() {
 
     // Flush RX FIFO (echo)
     uart_ll_rxfifo_rst(uartHw);
+
+    // Re-enable RX interrupt
+    uart_ll_clr_intsts_mask(uartHw, UART_INTR_RXFIFO_FULL);
+    uart_ll_ena_intr_mask(uartHw, UART_INTR_RXFIFO_FULL);
 
     rs485State = STATE_RX_WAIT_ADDRESS;
 }
