@@ -86,8 +86,8 @@
 // Pin Configuration (Waveshare ESP32-S3-RS485-CAN defaults)
 #define RS485_TX_PIN    17
 #define RS485_RX_PIN    18
-#define RS485_DE_PIN    -1    // -1 = auto-direction mode (board may have built-in auto-dir)
-                              // Set to 21 if manual DE control is needed
+#define RS485_DE_PIN    21    // GPIO 21 for DE control (Waveshare board)
+                              // Set to -1 for auto-direction transceivers
 
 // DE Pin Polarity - TRY CHANGING THIS IF YOU SEE CORRUPTED DATA!
 // 0 = Normal (DE HIGH during TX) - standard for most RS485 transceivers
