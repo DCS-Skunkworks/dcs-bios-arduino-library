@@ -109,12 +109,8 @@
 #define MESSAGE_BUFFER_SIZE    64   // Max pending message size
 
 // Timing Constants
-#define SYNC_TIMEOUT_US     500     // 500µs silence = sync detected
+#define SYNC_TIMEOUT_US     500     // 500µs silence = sync detected (matches AVR)
 #define RX_TIMEOUT_SYMBOLS  12      // ~480µs at 250kbaud (12 symbol times)
-#define FRAME_TIMEOUT_US    50000   // 50ms max time to complete a frame (configurable)
-
-// Protocol Limits (matches AVR buffer sizes for compatibility)
-#define MAX_FRAME_DATA_SIZE 128     // Maximum data bytes in a single frame
 
 // ============================================================================
 // UDP DEBUG - Uses CockpitOS debug console on port 4210
@@ -646,7 +642,6 @@ static volatile uint8_t rxMsgType = 0;
 static volatile uint8_t rxtxLen = 0;
 static volatile RxDataType rxDataType = RXDATA_IGNORE;
 static volatile int64_t lastRxTime = 0;
-static volatile int64_t frameStartTime = 0;  // Timestamp when current frame started
 static uart_port_t uartNum = (uart_port_t)RS485_UART_NUM;
 
 // ============================================================================
@@ -722,7 +717,7 @@ static void initRS485Hardware() {
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .rx_flow_ctrl_thresh = 0,
-        .source_clk = UART_SCLK_XTAL    // Use crystal for accurate baud rate
+        .source_clk = UART_SCLK_DEFAULT  // Use default clock source
     };
 
     // Install UART driver (no event queue needed for basic operation)
@@ -835,21 +830,15 @@ static void initRS485Hardware() {
 /**
  * sendResponse() - Transmit response packet to master
  *
- * With hardware RS485 mode:
- * - Just write data to UART
- * - Hardware automatically asserts DE before first bit
- * - Hardware automatically deasserts DE after last stop bit
- * - NO TIMING CALCULATIONS NEEDED!
- * - NO POLLING FOR TX COMPLETE!
- *
- * The uart_write_bytes() function is non-blocking - it copies data to the
- * TX FIFO and returns. The hardware handles the rest.
+ * Simple and elegant - just write bytes to UART and wait for completion.
+ * For auto-direction transceivers, no DE control is needed.
+ * For hardware RS485 mode, the UART peripheral handles DE automatically.
  */
 static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
     uint8_t len = messageBuffer.getLength();
 
-    packet[0] = len;      // Length = data bytes only (matches AVR Slave protocol)
+    packet[0] = len;      // Length = data bytes only (NOT including msgtype)
     packet[1] = 0;        // Message type = 0 (DCS-BIOS data)
 
     for (uint8_t i = 0; i < len; i++) {
@@ -860,105 +849,27 @@ static void sendResponse() {
 
     size_t totalBytes = 3 + len;
 
-    // =========================================================================
-    // TRANSMIT WITH DE CONTROL (matches AVR set_txen/clear_txen behavior)
-    // =========================================================================
-    // AVR disables RX before TX, then re-enables after TX complete.
-    // We emulate this by flushing RX BEFORE TX, then discarding echo bytes.
-
-    // Turnaround delay to let the bus settle after Master's poll
-    delayMicroseconds(500);  // 500µs turnaround time
-
-#if RS485_DE_MANUAL
-    // Flush any stale RX data BEFORE we start transmitting
-    uart_flush_input(uartNum);
-#endif
-
-    deAssert();  // Enable transmitter (manual mode) or no-op (hardware mode)
+    // Simple TX - hardware or auto-direction handles the rest
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
+    uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
 
-    // Wait for TX to complete before releasing DE
-    esp_err_t txResult = uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
-
-#if RS485_DE_MANUAL
-    // Manual mode: small delay to ensure stop bit completes, then release DE
-    delayMicroseconds(10);
-    deRelease();
-
-    // Discard exactly the echo bytes we sent - DO NOT flush (would lose Master's poll!)
-    // Wait a bit for echo bytes to arrive in buffer
-    delayMicroseconds(100);
-    uint8_t discardBuf[32];
-    size_t echoBytes = 0;
-    uart_get_buffered_data_len(uartNum, &echoBytes);
-    // Read and discard up to totalBytes (our echo) - don't read more!
-    size_t toDiscard = (echoBytes > totalBytes) ? totalBytes : echoBytes;
-    if (toDiscard > 0) {
-        uart_read_bytes(uartNum, discardBuf, toDiscard, 0);
-    }
-#else
-    // Hardware RS485 mode: RX should be disabled during TX, no echo to flush
-    size_t echoBytes = 0;
-    size_t toDiscard = 0;
-#endif
-
-    // Reset timing reference after TX
-    lastRxTime = esp_timer_get_time();
-
-    // Clear message buffer
+    // Clear message buffer and return to RX state
     messageBuffer.clear();
     messageBuffer.complete = false;
-
-    // Return to RX state
     rs485State = STATE_RX_WAIT_ADDRESS;
 
-    // DEBUG: Print AFTER TX is complete (doesn't affect timing!)
-    DBGF("[TX SENT %d bytes", totalBytes);
-    if (toDiscard > 0) {
-        DBGF(" echo=%d/%d", toDiscard, echoBytes);
-    }
-    if (txResult != 0) {
-        DBGF(" err=%d", txResult);
-    }
-    DBGLN("]");
+    DBGF("[TX %d bytes]\n", totalBytes);
 }
 
 /**
- * sendZeroLengthResponse() - Respond with empty packet
+ * sendZeroLengthResponse() - Respond with empty packet (no data to send)
  */
 static void sendZeroLengthResponse() {
     uint8_t response = 0;
 
-    // Turnaround delay to let the bus settle (must match sendResponse)
-    delayMicroseconds(500);
-
-#if RS485_DE_MANUAL
-    // Flush any stale RX data BEFORE we start transmitting
-    uart_flush_input(uartNum);
-#endif
-
-    // Transmit with DE control
-    deAssert();  // Enable transmitter
+    // Simple TX - hardware or auto-direction handles the rest
     uart_write_bytes(uartNum, (const char*)&response, 1);
     uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
-
-#if RS485_DE_MANUAL
-    delayMicroseconds(10);  // Ensure stop bit completes
-    deRelease();  // Disable transmitter, enable receiver
-
-    // Discard exactly 1 echo byte - DO NOT flush (would lose Master's poll!)
-    delayMicroseconds(100);
-    uint8_t discardBuf[4];
-    size_t available = 0;
-    uart_get_buffered_data_len(uartNum, &available);
-    if (available > 0) {
-        uart_read_bytes(uartNum, discardBuf, 1, 0);  // Discard our 1 echo byte
-    }
-#endif
-    // Hardware RS485 mode: no flush needed, RX disabled during TX
-
-    // Reset timing reference after TX
-    lastRxTime = esp_timer_get_time();
 
     rs485State = STATE_RX_WAIT_ADDRESS;
 }
@@ -970,9 +881,10 @@ static void sendZeroLengthResponse() {
 /**
  * processRS485() - Main state machine processing
  *
- * Significantly simplified compared to the software DE control version:
- * - No TX_WAIT_COMPLETE state needed
- * - No timing calculations for DE deassertion
+ * Simple and elegant - matches AVR behavior exactly:
+ * - 500µs sync detection
+ * - No frame timeouts (trust the protocol)
+ * - No message buffer timeouts (trust the master will poll)
  * - Just process RX bytes and send responses when needed
  */
 static void processRS485() {
@@ -981,50 +893,10 @@ static void processRS485() {
     // =========================================================================
     // Sync Detection - 500µs of bus silence (matches AVR behavior exactly)
     // =========================================================================
-    // NOTE: When NO bytes are pending, we check for silence here.
-    // When bytes ARE pending, the SYNC state handler below uses the
-    // silence-breaking byte as the first protocol byte (AVR fall-through behavior).
     if (rs485State == STATE_SYNC) {
         if ((now - lastRxTime) >= SYNC_TIMEOUT_US) {
             rs485State = STATE_RX_WAIT_ADDRESS;
-            DBGVLN("[SYNC->RDY]");  // Sync complete, ready to receive
         }
-    }
-
-    // =========================================================================
-    // Frame Timeout Protection - Prevents stuck state if frame never completes
-    // =========================================================================
-    // If we're in the middle of receiving a frame and no data arrives for too
-    // long, something went wrong (master reset, bus error, etc.). Resync.
-    // This is a robustness enhancement beyond AVR behavior.
-    if (rs485State != STATE_SYNC && rs485State != STATE_RX_WAIT_ADDRESS) {
-        if ((now - lastRxTime) >= FRAME_TIMEOUT_US) {
-            DBGLN("[FRAME TIMEOUT->SYNC]");
-#if UDP_DEBUG_ENABLE
-            dbgErrCount++;
-#endif
-            rs485State = STATE_SYNC;
-            lastRxTime = now;  // Reset sync timing
-        }
-    }
-
-    // =========================================================================
-    // Message Buffer Timeout - Clear stuck messages after 1 second
-    // =========================================================================
-    // If a message has been queued but not sent (no poll received), clear it
-    // to prevent permanent "buffer busy" blocking.
-    static int64_t messageQueuedTime = 0;
-    if (messageBuffer.complete) {
-        if (messageQueuedTime == 0) {
-            messageQueuedTime = now;  // Start timeout timer
-        } else if ((now - messageQueuedTime) > 1000000) {  // 1 second timeout
-            DBGLN("[MSG TIMEOUT - clearing stuck buffer]");
-            messageBuffer.clear();
-            messageBuffer.complete = false;
-            messageQueuedTime = 0;
-        }
-    } else {
-        messageQueuedTime = 0;  // Reset timer when buffer is free
     }
 
     // =========================================================================
@@ -1063,15 +935,12 @@ static void processRS485() {
             if ((now - lastRxTime) >= SYNC_TIMEOUT_US) {
                 // Sync complete! This byte is the first protocol byte (address).
                 // Fall through to address processing (no break, like AVR).
-                DBGVLN("[SYNC->ADDR]");
                 rxSlaveAddress = c;
                 rs485State = STATE_RX_WAIT_MSGTYPE;
                 lastRxTime = now;
-                frameStartTime = now;  // Start frame timeout tracking
                 continue;
             } else {
                 // Not enough silence yet - stay in sync, update timing
-                DBGVF("[SYNC:0x%02X]\n", c);
                 lastRxTime = now;
                 continue;
             }
@@ -1088,7 +957,6 @@ static void processRS485() {
             case STATE_RX_WAIT_ADDRESS:
                 rxSlaveAddress = c;
                 rs485State = STATE_RX_WAIT_MSGTYPE;
-                frameStartTime = now;  // Start frame timeout tracking
                 break;
 
             case STATE_RX_WAIT_MSGTYPE:
@@ -1098,19 +966,6 @@ static void processRS485() {
 
             case STATE_RX_WAIT_DATALENGTH:
                 rxtxLen = c;
-                // Log every frame header: [addr][msgtype][len]
-                DBGVF("[FRM a=%d m=%d l=%d]\n", rxSlaveAddress, rxMsgType, rxtxLen);
-
-                // Protocol sanity check: data length must be reasonable
-                // (matches AVR buffer overflow protection behavior)
-                if (rxtxLen > MAX_FRAME_DATA_SIZE) {
-                    // Garbage data - don't spam debug, just count it
-#if UDP_DEBUG_ENABLE
-                    dbgErrCount++;
-#endif
-                    rs485State = STATE_SYNC;
-                    break;
-                }
 
                 if (rxtxLen == 0) {
                     goto handle_message_complete;

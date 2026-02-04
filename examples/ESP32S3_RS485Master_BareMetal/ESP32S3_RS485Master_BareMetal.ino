@@ -367,9 +367,8 @@ public:
     }
 
     void init() {
-        // Use crystal clock for accurate baud rate (must match Slave!)
-        // XTAL is more accurate than APB (PLL-derived) across devices
-        #define UART_CLK_SOURCE UART_SCLK_XTAL
+        // Use default clock source (must match Slave!)
+        #define UART_CLK_SOURCE UART_SCLK_DEFAULT
 
         uart_config_t uart_config = {
             .baud_rate = RS485_BAUD_RATE,
