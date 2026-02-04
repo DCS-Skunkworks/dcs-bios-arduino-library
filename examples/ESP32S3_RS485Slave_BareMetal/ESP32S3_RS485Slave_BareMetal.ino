@@ -110,8 +110,9 @@
 #define MESSAGE_BUFFER_SIZE    64   // Max pending message size
 
 // Timing Constants
-#define SYNC_TIMEOUT_US     500     // 500µs silence = sync detected (matches AVR)
-#define RX_TIMEOUT_SYMBOLS  12      // ~480µs at 250kbaud (12 symbol times)
+#define SYNC_TIMEOUT_US        500       // 500µs silence = sync detected (matches AVR)
+#define RX_TIMEOUT_SYMBOLS     12        // ~480µs at 250kbaud (12 symbol times)
+#define RX_FRAME_TIMEOUT_US    500000    // 500ms - reset if stuck mid-frame (safety net)
 
 // ============================================================================
 // UDP DEBUG - Uses CockpitOS debug console on port 4210
@@ -119,7 +120,7 @@
 // This sends debug data via UDP without affecting RS485 timing.
 // Set UDP_DEBUG_ENABLE to 1 and configure WiFi to use.
 
-#define UDP_DEBUG_ENABLE    1       // Set to 1 to enable UDP debug
+#define UDP_DEBUG_ENABLE    0       // Set to 1 to enable UDP debug (0 = disabled for best timing)
 #define UDP_DEBUG_IP        "255.255.255.255"  // Broadcast to all
 #define UDP_DEBUG_PORT      4210    // CockpitOS debug port
 #define UDP_DEBUG_NAME      "RS485-SLAVE"     // Device identifier in debug messages
@@ -852,14 +853,12 @@ static void sendResponse() {
 
     // Simple TX - hardware or auto-direction handles the rest
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
-    uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+    ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
 
     // Clear message buffer and return to RX state
     messageBuffer.clear();
     messageBuffer.complete = false;
     rs485State = STATE_RX_WAIT_ADDRESS;
-
-    DBGF("[TX %d bytes]\n", totalBytes);
 }
 
 /**
@@ -870,7 +869,7 @@ static void sendZeroLengthResponse() {
 
     // Simple TX - hardware or auto-direction handles the rest
     uart_write_bytes(uartNum, (const char*)&response, 1);
-    uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+    ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
 
     rs485State = STATE_RX_WAIT_ADDRESS;
 }
@@ -882,14 +881,21 @@ static void sendZeroLengthResponse() {
 /**
  * processRS485() - Main state machine processing
  *
- * Simple and elegant - matches AVR behavior exactly:
+ * MATCHES OLD WORKING VERSION EXACTLY:
+ * - Frame timeout safety (500ms reset if stuck mid-frame)
  * - 500µs sync detection
- * - No frame timeouts (trust the protocol)
- * - No message buffer timeouts (trust the master will poll)
- * - Just process RX bytes and send responses when needed
+ * - Simple lastRxTime update inside loop
+ * - Simple switch case for STATE_SYNC (just break)
  */
 static void processRS485() {
     int64_t now = esp_timer_get_time();
+
+    // =========================================================================
+    // Frame Timeout Safety - Reset if stuck mid-frame for too long
+    // =========================================================================
+    if (rs485State != STATE_SYNC && (now - lastRxTime) >= RX_FRAME_TIMEOUT_US) {
+        rs485State = STATE_SYNC;
+    }
 
     // =========================================================================
     // Sync Detection - 500µs of bus silence (matches AVR behavior exactly)
@@ -906,53 +912,17 @@ static void processRS485() {
     size_t available = 0;
     uart_get_buffered_data_len(uartNum, &available);
 
-#if DEBUG_VERBOSE
-    // Show when data arrives (only once per batch, not per byte)
-    if (available > 0) {
-        static uint32_t lastRxReport = 0;
-        uint32_t nowMs = millis();
-        if (nowMs - lastRxReport > 100) {  // Rate limit to every 100ms
-            DBGVF("[RX %d bytes]\n", available);
-            lastRxReport = nowMs;
-        }
-    }
-#endif
-
     while (available > 0) {
         uint8_t c;
         if (uart_read_bytes(uartNum, &c, 1, 0) != 1) break;
         available--;
 
-        // =====================================================================
-        // SYNC STATE HANDLING - AVR Fall-Through Behavior
-        // =====================================================================
-        // The AVR uses a clever fall-through: when in SYNC and enough silence
-        // has passed, it does NOT break but falls through to RX_WAIT_ADDRESS,
-        // using the SAME byte as the address. We replicate this exactly.
-        //
-        // CRITICAL: Check time gap BEFORE updating lastRxTime!
-        // =====================================================================
-        if (rs485State == STATE_SYNC) {
-            if ((now - lastRxTime) >= SYNC_TIMEOUT_US) {
-                // Sync complete! This byte is the first protocol byte (address).
-                // Fall through to address processing (no break, like AVR).
-                rxSlaveAddress = c;
-                rs485State = STATE_RX_WAIT_MSGTYPE;
-                lastRxTime = now;
-                continue;
-            } else {
-                // Not enough silence yet - stay in sync, update timing
-                lastRxTime = now;
-                continue;
-            }
-        }
-
-        // For all non-SYNC states, update lastRxTime
+        // Update lastRxTime ONCE at start of loop (simple pattern from OLD version)
         lastRxTime = now;
 
         switch (rs485State) {
             case STATE_SYNC:
-                // Should never reach here - handled above
+                // Byte received during sync - stay in sync, wait for silence
                 break;
 
             case STATE_RX_WAIT_ADDRESS:
@@ -996,7 +966,6 @@ static void processRS485() {
 
             case STATE_RX_WAIT_ANSWER_DATALENGTH:
                 rxtxLen = c;
-                DBGVF("[ANS l=%d]\n", rxtxLen);
                 if (rxtxLen == 0) {
                     rs485State = STATE_RX_WAIT_ADDRESS;
                 } else {
@@ -1028,52 +997,26 @@ static void processRS485() {
     handle_message_complete:
         if (rxSlaveAddress == 0) {
             // Broadcast - no response
-            DBGVLN("[BCAST]");
-#if UDP_DEBUG_ENABLE
-            dbgBcastCount++;
-#endif
             rs485State = STATE_RX_WAIT_ADDRESS;
         } else if (rxSlaveAddress == SLAVE_ADDRESS) {
             // This message is for us!
             if (rxMsgType == 0 && rxtxLen == 0) {
-#if UDP_DEBUG_ENABLE
-                dbgPollCount++;
-#endif
                 if (!messageBuffer.complete) {
                     // No data to send - respond immediately with zero-length
                     sendZeroLengthResponse();
                 } else {
-#if UDP_DEBUG_ENABLE
-                    dbgTxCount++;
-                    DBGF("[TX] sending %d bytes\n", messageBuffer.getLength());
-#endif
-                    // CRITICAL: Call sendResponse() IMMEDIATELY!
-                    // Debug output is printed AFTER TX inside the function.
+                    // Send our queued message
                     sendResponse();
                 }
             } else {
-#if UDP_DEBUG_ENABLE
-                dbgErrCount++;
-#endif
-                DBGF("[ERR m=%d l=%d]\n", rxMsgType, rxtxLen);  // Unexpected message (keep visible)
+                // Unexpected message type/length - reset to sync
                 rs485State = STATE_SYNC;
             }
         } else {
-            // Message for another slave
-            DBGVF("[OTHER s=%d]\n", rxSlaveAddress);
+            // Message for another slave - wait for their response
             rs485State = STATE_RX_WAIT_ANSWER_DATALENGTH;
         }
     }
-
-#if UDP_DEBUG_ENABLE
-    // Periodic status report (every 5 seconds)
-    uint32_t nowMs = millis();
-    if (nowMs - dbgLastReport >= 5000) {
-        DBGF("[STATS] polls=%lu bcast=%lu tx=%lu err=%lu\n",
-             dbgPollCount, dbgBcastCount, dbgTxCount, dbgErrCount);
-        dbgLastReport = nowMs;
-    }
-#endif
 }
 
 // ============================================================================
