@@ -26,7 +26,8 @@
 // ============================================================================
 // CLOCK SOURCE SELECTION
 // ============================================================================
-#define UART_CLOCK_SOURCE   UART_SCLK_XTAL
+// Note: ESP-IDF v5.x uses soc_module_clk_t for UART clock
+// We use UART_SCLK_DEFAULT which maps to APB clock (80MHz)
 
 // Buffer Sizes
 #define MESSAGE_BUFFER_SIZE    64
@@ -792,13 +793,14 @@ static void initRS485Hardware() {
     Serial.println("  [3] UART pins configured OK");
 
     Serial.println("  [4] Configuring UART parameters...");
-    // Reset and configure UART
-    uart_ll_set_reset_core(uartHw, true);
-    uart_ll_set_reset_core(uartHw, false);
+    // Reset UART via peripheral module (ESP-IDF v5.x way)
+    periph_module_reset(PERIPH_UART1_MODULE);
 
     // Set clock source and baud rate
-    uart_ll_set_sclk(uartHw, UART_CLOCK_SOURCE);
-    uint32_t sclk_freq = (UART_CLOCK_SOURCE == UART_SCLK_XTAL) ? 40000000 : 80000000;
+    // ESP-IDF v5.x uses soc_module_clk_t, not uart_sclk_t
+    // Use APB clock which is 80MHz on ESP32-S3
+    uart_ll_set_sclk(uartHw, (soc_module_clk_t)UART_SCLK_DEFAULT);
+    uint32_t sclk_freq = 80000000;  // APB clock frequency
     uart_ll_set_baudrate(uartHw, RS485_BAUD_RATE, sclk_freq);
 
     // Configure frame format: 8N1
