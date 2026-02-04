@@ -387,7 +387,7 @@ public:
         do {
             messageSentOrQueued = false;
 
-            if (now - pi->lastPollTime > pi->pollingIntervalMs) {
+            if (now - pi->lastPollTime >= pi->pollingIntervalMs) {
                 pi->pollInput();
                 if (messageSentOrQueued) {
                     lastSender = pi;
@@ -949,7 +949,7 @@ private:
     }
 
 public:
-    Switch2Pos(const char* msg, uint8_t pin, bool reverse = false, unsigned long debounceDelay = 50)
+    Switch2Pos(const char* msg, uint8_t pin, bool reverse = false, unsigned long debounceDelay = 5)
         : PollingInput(POLL_EVERY_TIME), msg(msg), pin(pin), reverse(reverse),
           debounceDelay(debounceDelay), lastDebounceTime(0) {
         pinMode(pin, INPUT_PULLUP);
