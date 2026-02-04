@@ -872,16 +872,20 @@ static void sendResponse() {
     // Wait for TX to complete before releasing DE
     esp_err_t txResult = uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
 
-    // Small delay to ensure stop bit fully completes before DE release
-    // At 250kbaud: 1 bit = 4µs, so 10µs gives 2+ bit times margin
+#if RS485_DE_MANUAL
+    // Manual mode: small delay to ensure stop bit completes, then release DE
     delayMicroseconds(10);
+    deRelease();
 
-    deRelease();  // Disable transmitter, enable receiver
-
-    // Flush any echo bytes
+    // Flush echo bytes (in manual mode, we receive our own TX)
     size_t echoBytes = 0;
     uart_get_buffered_data_len(uartNum, &echoBytes);
     uart_flush_input(uartNum);
+#else
+    // Hardware RS485 mode: RX should be disabled during TX, no echo to flush
+    // DO NOT flush - it might remove valid incoming data!
+    size_t echoBytes = 0;
+#endif
 
     // Reset timing reference after TX
     lastRxTime = esp_timer_get_time();
@@ -914,11 +918,13 @@ static void sendZeroLengthResponse() {
     deAssert();  // Enable transmitter
     uart_write_bytes(uartNum, (const char*)&response, 1);
     uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+
+#if RS485_DE_MANUAL
     delayMicroseconds(10);  // Ensure stop bit completes
     deRelease();  // Disable transmitter, enable receiver
-
-    // Flush any echo bytes (don't spam debug)
-    uart_flush_input(uartNum);
+    uart_flush_input(uartNum);  // Flush echo bytes
+#endif
+    // Hardware RS485 mode: no flush needed, RX disabled during TX
 
     // Reset timing reference after TX
     lastRxTime = esp_timer_get_time();
