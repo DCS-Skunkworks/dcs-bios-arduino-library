@@ -778,21 +778,6 @@ static void initRS485Hardware() {
     // Enable hardware RS485 mode with automatic DE control
     ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX));
 
-    // =========================================================================
-    // CRITICAL: Add delay between DE assertion and TX start
-    // =========================================================================
-    // The AVR uses tx_delay_byte() which creates ~40µs (1 byte time) delay
-    // between receiving the poll and asserting DE + starting TX.
-    //
-    // The ESP32's hardware RS485 mode needs this delay configured explicitly.
-    // Without it, DE assertion and first TX bit happen simultaneously, which
-    // can cause the transceiver to not be fully switched when data starts.
-    //
-    // Configure RS485 TX delay: delay in bit times after DE before TX starts
-    // At 250kbaud: 1 bit = 4µs, so 10 bits = 40µs (matches AVR tx_delay_byte)
-    // Enable dl1_en which adds a 1-bit delay after DE assertion before TX
-    UART_LL_GET_HW(uartNum)->rs485_conf.dl1_en = 1;
-
 #if RS485_DE_INVERT
     // Invert DE polarity if needed (some boards have inverters on DE line)
     ESP_ERROR_CHECK(uart_set_line_inverse(uartNum, UART_SIGNAL_RTS_INV));
@@ -823,15 +808,6 @@ static void initRS485Hardware() {
     ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_UART));
 
 #endif
-
-    // =========================================================================
-    // TX IDLE CONFIGURATION - CRITICAL for auto-direction transceivers
-    // =========================================================================
-    // Add idle symbols BEFORE TX data starts. This gives the auto-direction
-    // transceiver time to detect TX activity and switch to TX mode before
-    // the actual data bits arrive. Without this, the first byte gets corrupted.
-    // At 250kbaud: 1 symbol = 40µs. 10 symbols = 400µs idle before data.
-    uart_set_tx_idle_num(uartNum, 10);
 
     // =========================================================================
     // RX TIMEOUT CONFIGURATION
@@ -866,7 +842,7 @@ static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
     uint8_t len = messageBuffer.getLength();
 
-    packet[0] = len;      // Length = data bytes only (NOT including msgtype)
+    packet[0] = len + 1;  // Length INCLUDES msgtype (this was the bug - we had just 'len')
     packet[1] = 0;        // Message type = 0 (DCS-BIOS data)
 
     for (uint8_t i = 0; i < len; i++) {
@@ -876,53 +852,16 @@ static void sendResponse() {
     packet[2 + len] = 0x72;  // Fixed checksum per DCS-BIOS protocol
 
     size_t totalBytes = 3 + len;
-    txSeqNum++;
 
 #if UDP_DEBUG_ENABLE
-    // Log BEFORE TX with detailed byte dump
-    char hexBuf[128];
-    int pos = 0;
-    for (size_t i = 0; i < totalBytes && pos < 120; i++) {
-        pos += snprintf(hexBuf + pos, sizeof(hexBuf) - pos, "%02X ", packet[i]);
-    }
-
-    // Also show as ASCII for the data portion
-    char ascBuf[64];
-    int ascPos = 0;
-    for (uint8_t i = 0; i < len && ascPos < 60; i++) {
-        char c = packet[2 + i];
-        if (c >= 32 && c <= 126) {
-            ascBuf[ascPos++] = c;
-        } else {
-            ascBuf[ascPos++] = '.';
-        }
-    }
-    ascBuf[ascPos] = '\0';
-
-    int64_t txStartTime = esp_timer_get_time();
-    udpDbgSend("TX#%lu len=%d total=%d hex=[%s] asc=\"%s\"",
-               txSeqNum, len, totalBytes, hexBuf, ascBuf);
+    txSeqNum++;
+    udpDbgSend("TX#%lu len=%d+1 bytes=[%02X %02X ... %02X]",
+               txSeqNum, len, packet[0], packet[1], packet[totalBytes-1]);
 #endif
 
-    // Assert RTS/DE manually first, wait, then TX
-    // This mimics the AVR's tx_delay_byte() which warms up the transceiver
-    uart_set_rts(uartNum, 1);  // Assert RTS (DE) before TX starts
-    delayMicroseconds(50);     // 50µs delay - let transceiver fully switch to TX mode
-
+    // Simple TX - let hardware RS485 mode handle DE automatically
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
-
-    delayMicroseconds(10);     // Small delay after TX before releasing DE
-    uart_set_rts(uartNum, 0);  // Release RTS (DE) after TX complete
-
-#if UDP_DEBUG_ENABLE
-    int64_t txEndTime = esp_timer_get_time();
-    udpDbgSend("TX#%lu DONE dt=%lldus", txSeqNum, txEndTime - txStartTime);
-#endif
-
-    // NO ECHO HANDLING - auto-direction transceiver suppresses echo
-    // The bytes we were seeing were NOT echo - they were the next
-    // broadcast (export data) from the Master that we were accidentally flushing!
 
     // Clear message buffer and return to RX state
     messageBuffer.clear();
@@ -932,22 +871,13 @@ static void sendResponse() {
 
 /**
  * sendZeroLengthResponse() - Respond with empty packet (no data to send)
- *
- * Uses same manual RTS/DE timing as sendResponse() for consistency
  */
 static void sendZeroLengthResponse() {
     uint8_t response = 0;
 
-    // Assert RTS/DE manually first, wait, then TX
-    // Same pattern as sendResponse() - let transceiver fully switch to TX mode
-    uart_set_rts(uartNum, 1);  // Assert RTS (DE) before TX starts
-    delayMicroseconds(50);     // 50µs delay
-
+    // Simple TX - hardware RS485 mode handles DE automatically
     uart_write_bytes(uartNum, (const char*)&response, 1);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
-
-    delayMicroseconds(10);     // Small delay after TX before releasing DE
-    uart_set_rts(uartNum, 0);  // Release RTS (DE) after TX complete
 
     rs485State = STATE_RX_WAIT_ADDRESS;
 }
