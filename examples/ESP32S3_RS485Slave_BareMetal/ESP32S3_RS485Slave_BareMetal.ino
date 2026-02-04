@@ -112,25 +112,37 @@
 #define MAX_FRAME_DATA_SIZE 128     // Maximum data bytes in a single frame
 
 // ============================================================================
-// DEBUG MODE - Set to 1 to enable diagnostic output via USB Serial
+// UDP DEBUG - Uses CockpitOS debug console on port 4210
 // ============================================================================
-#define DEBUG_MODE          1       // Set to 0 to disable all debug output
+// This sends debug data via UDP without affecting RS485 timing.
+// Set UDP_DEBUG_ENABLE to 1 and configure WiFi to use.
+
+#define UDP_DEBUG_ENABLE    0       // Set to 1 to enable UDP debug
+#define UDP_DEBUG_IP        "255.255.255.255"  // Broadcast to all
+#define UDP_DEBUG_PORT      4210    // CockpitOS debug port
+#define UDP_DEBUG_NAME      "RS485-SLAVE"     // Device identifier in debug messages
+#define WIFI_SSID           "YourWiFiSSID"
+#define WIFI_PASSWORD       "YourWiFiPassword"
+
+// Legacy serial debug (only used if UDP_DEBUG_ENABLE is 0)
 #define DEBUG_VERBOSE       0       // Set to 1 for detailed frame-by-frame logging
 
-#if DEBUG_MODE
+// Debug macros - use UDP if enabled, otherwise Serial
+#if UDP_DEBUG_ENABLE
+    // Forward declaration - actual class defined after includes
+    #define DBG_INIT()      // Handled in setup()
+    #define DBG(x)
+    #define DBGLN(x)
+    #define DBGF(...)       udpDbgSend(__VA_ARGS__)
+#else
     #define DBG_INIT()      Serial.begin(115200); delay(2000)
     #define DBG(x)          Serial.print(x)
     #define DBGLN(x)        Serial.println(x)
     #define DBGF(...)       Serial.printf(__VA_ARGS__)
-#else
-    #define DBG_INIT()
-    #define DBG(x)
-    #define DBGLN(x)
-    #define DBGF(...)
 #endif
 
-// Verbose logging for detailed protocol debugging (very spammy)
-#if DEBUG_VERBOSE
+// Verbose logging for detailed protocol debugging (very spammy - disabled)
+#if DEBUG_VERBOSE && !UDP_DEBUG_ENABLE
     #define DBGV(x)         Serial.print(x)
     #define DBGVLN(x)       Serial.println(x)
     #define DBGVF(...)      Serial.printf(__VA_ARGS__)
@@ -150,6 +162,46 @@
 #include <hal/uart_ll.h>
 #include <soc/uart_struct.h>
 #include <esp_timer.h>
+
+#if UDP_DEBUG_ENABLE
+#include <WiFi.h>
+#include <WiFiUdp.h>
+
+// UDP Debug - lightweight, non-blocking
+static WiFiUDP udpDbg;
+static IPAddress udpDbgTarget;
+static bool udpDbgConnected = false;
+static char udpDbgBuf[256];
+
+void udpDbgInit() {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    udpDbgTarget.fromString(UDP_DEBUG_IP);
+}
+
+void udpDbgCheck() {
+    if (!udpDbgConnected && WiFi.status() == WL_CONNECTED) {
+        udpDbgConnected = true;
+        udpDbgSend("=== %s ONLINE === addr=%d IP=%s", UDP_DEBUG_NAME, SLAVE_ADDRESS, WiFi.localIP().toString().c_str());
+    }
+}
+
+void udpDbgSend(const char* fmt, ...) {
+    if (!udpDbgConnected) return;
+    int pos = snprintf(udpDbgBuf, sizeof(udpDbgBuf), "[%s] ", UDP_DEBUG_NAME);
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(udpDbgBuf + pos, sizeof(udpDbgBuf) - pos, fmt, args);
+    va_end(args);
+    udpDbg.beginPacket(udpDbgTarget, UDP_DEBUG_PORT);
+    udpDbg.write((uint8_t*)udpDbgBuf, strlen(udpDbgBuf));
+    udpDbg.endPacket();
+}
+#else
+// Dummy functions when UDP debug is disabled
+#define udpDbgInit()
+#define udpDbgCheck()
+#endif
 
 // ============================================================================
 // COMPILE-TIME CHECKS
@@ -593,7 +645,7 @@ static volatile int64_t frameStartTime = 0;  // Timestamp when current frame sta
 static uart_port_t uartNum = (uart_port_t)RS485_UART_NUM;
 
 // Debug counters for periodic status report
-#if DEBUG_MODE
+#if UDP_DEBUG_ENABLE
 static uint32_t dbgPollCount = 0;      // Polls received for us
 static uint32_t dbgBcastCount = 0;     // Broadcasts received
 static uint32_t dbgTxCount = 0;        // Data responses sent
@@ -848,7 +900,7 @@ static void processRS485() {
     if (rs485State != STATE_SYNC && rs485State != STATE_RX_WAIT_ADDRESS) {
         if ((now - lastRxTime) >= FRAME_TIMEOUT_US) {
             DBGLN("[FRAME TIMEOUT->SYNC]");
-#if DEBUG_MODE
+#if UDP_DEBUG_ENABLE
             dbgErrCount++;
 #endif
             rs485State = STATE_SYNC;
@@ -936,7 +988,7 @@ static void processRS485() {
                     // Show full frame header for debugging - this is garbage data!
                     DBGF("[ERR GARBAGE FRAME: addr=0x%02X msgtype=0x%02X len=%d]\n",
                          rxSlaveAddress, rxMsgType, rxtxLen);
-#if DEBUG_MODE
+#if UDP_DEBUG_ENABLE
                     dbgErrCount++;
 #endif
                     rs485State = STATE_SYNC;
@@ -1004,21 +1056,21 @@ static void processRS485() {
         if (rxSlaveAddress == 0) {
             // Broadcast - no response
             DBGVLN("[BCAST]");
-#if DEBUG_MODE
+#if UDP_DEBUG_ENABLE
             dbgBcastCount++;
 #endif
             rs485State = STATE_RX_WAIT_ADDRESS;
         } else if (rxSlaveAddress == SLAVE_ADDRESS) {
             // This message is for us!
             if (rxMsgType == 0 && rxtxLen == 0) {
-#if DEBUG_MODE
+#if UDP_DEBUG_ENABLE
                 dbgPollCount++;
 #endif
                 if (!messageBuffer.complete) {
                     // No data to send - respond immediately with zero-length
                     sendZeroLengthResponse();
                 } else {
-#if DEBUG_MODE
+#if UDP_DEBUG_ENABLE
                     dbgTxCount++;
 #endif
                     // CRITICAL: Call sendResponse() IMMEDIATELY!
@@ -1026,7 +1078,7 @@ static void processRS485() {
                     sendResponse();
                 }
             } else {
-#if DEBUG_MODE
+#if UDP_DEBUG_ENABLE
                 dbgErrCount++;
 #endif
                 DBGF("[ERR m=%d l=%d]\n", rxMsgType, rxtxLen);  // Unexpected message (keep visible)
@@ -1039,7 +1091,7 @@ static void processRS485() {
         }
     }
 
-#if DEBUG_MODE
+#if UDP_DEBUG_ENABLE
     // Periodic status report (every 5 seconds)
     uint32_t nowMs = millis();
     if (nowMs - dbgLastReport >= 5000) {
@@ -1148,21 +1200,16 @@ LED mcReadyLed(0x740C, 0x8000, MC_READY_PIN);
 // ============================================================================
 
 void setup() {
-    // Initialize debug output (controlled by DEBUG_MODE)
+    // Initialize debug output
     DBG_INIT();
-    DBGLN("=== ESP32 RS485 SLAVE DEBUG ===");
-    DBGF("Slave Address: %d\n", SLAVE_ADDRESS);
-    DBGF("DE Pin: %d\n", RS485_DE_PIN);
-    DBGF("TX/RX Pins: %d/%d\n", RS485_TX_PIN, RS485_RX_PIN);
-    DBGLN("================================");
+    udpDbgInit();  // Start WiFi for UDP debug (non-blocking)
 
     // Initialize RS485 with HARDWARE DE control
     initRS485Hardware();
-
-    DBGLN("[INIT COMPLETE]");
 }
 
 void loop() {
+    udpDbgCheck();  // Check WiFi connection for UDP debug
     processRS485();
     PollingInput::pollInputs();
     ExportStreamListener::loopAll();
