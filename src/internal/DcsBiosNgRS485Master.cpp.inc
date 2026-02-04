@@ -91,64 +91,19 @@
 		
 		// timeout for non-existing devices (1ms to receive first byte)
 		if (state == RX_WAIT_DATALENGTH && ((micros() - rx_start_time) > 1000)) {
-			// Only log if slave WAS present but stopped responding
-			bool was_present = slave_present[poll_address];
 			slave_present[poll_address] = false;
 			noInterrupts(); s8();
 			tx_byte(0); // send zero data length on behalf of the non-existing device
 			state = TIMEOUT_ZEROBYTE_SENT;
 			c8(); interrupts();
-			// Log only when a previously-responding slave disappears
-			if (was_present) {
-				messageBuffer.clear();
-				messageBuffer.put('['); messageBuffer.put('E'); messageBuffer.put('R'); messageBuffer.put('R');
-				messageBuffer.put(':'); messageBuffer.put('N'); messageBuffer.put('O'); messageBuffer.put('R');
-				messageBuffer.put('S'); messageBuffer.put('P'); messageBuffer.put(':');
-				messageBuffer.put('0' + (poll_address / 100) % 10);
-				messageBuffer.put('0' + (poll_address / 10) % 10);
-				messageBuffer.put('0' + poll_address % 10);
-				messageBuffer.put(']'); messageBuffer.put('\n');
-				noInterrupts();
-				messageBuffer.complete = true;
-				uart0.set_udrie();
-				interrupts();
-			}
 		}
 		
 		if ((state == RX_WAIT_MSGTYPE || state == RX_WAIT_DATA || state == RX_WAIT_CHECKSUM)
 		&& ((micros() - rx_start_time) > 5000)) {
-			// Report which state we timed out in for debugging
-			// Include rxtx_len to see if length byte was corrupted
+			// 5ms timeout waiting for rest of message - silently recover
 			messageBuffer.clear();
-			if (state == RX_WAIT_MSGTYPE) {
-				// Got length, waiting for msgtype - length might be wrong
-				messageBuffer.put('['); messageBuffer.put('E'); messageBuffer.put('R'); messageBuffer.put('R');
-				messageBuffer.put(':'); messageBuffer.put('M'); messageBuffer.put('S'); messageBuffer.put('G');
-				messageBuffer.put('T'); messageBuffer.put('Y'); messageBuffer.put('P'); messageBuffer.put('E');
-				messageBuffer.put(':'); messageBuffer.put('L'); messageBuffer.put('=');
-				messageBuffer.put('0' + (rxtx_len / 100) % 10);
-				messageBuffer.put('0' + (rxtx_len / 10) % 10);
-				messageBuffer.put('0' + rxtx_len % 10);
-				messageBuffer.put(']'); messageBuffer.put('\n');
-			} else if (state == RX_WAIT_DATA) {
-				// Got msgtype, waiting for data - rxtx_len shows remaining bytes expected
-				messageBuffer.put('['); messageBuffer.put('E'); messageBuffer.put('R'); messageBuffer.put('R');
-				messageBuffer.put(':'); messageBuffer.put('D'); messageBuffer.put('A'); messageBuffer.put('T');
-				messageBuffer.put('A'); messageBuffer.put(':'); messageBuffer.put('R'); messageBuffer.put('=');
-				messageBuffer.put('0' + (rxtx_len / 100) % 10);
-				messageBuffer.put('0' + (rxtx_len / 10) % 10);
-				messageBuffer.put('0' + rxtx_len % 10);
-				messageBuffer.put(']'); messageBuffer.put('\n');
-			} else {
-				// Got all data, waiting for checksum
-				messageBuffer.put('['); messageBuffer.put('E'); messageBuffer.put('R'); messageBuffer.put('R');
-				messageBuffer.put(':'); messageBuffer.put('C'); messageBuffer.put('H'); messageBuffer.put('K');
-				messageBuffer.put('S'); messageBuffer.put('U'); messageBuffer.put('M'); messageBuffer.put(']');
-				messageBuffer.put('\n');
-			}
 			noInterrupts(); s8();
 			messageBuffer.complete = true;
-			uart0.set_udrie();
 			state = IDLE;
 			c8(); interrupts();
 		}
@@ -295,11 +250,8 @@
 		volatile unsigned long _tx_start_time = tx_start_time;
 		c8(); interrupts();
 		if (pc_tx_buffer && (micros() - _tx_start_time > 5000)) {
+			// PC TX timeout - silently clear and move on
 			pc_tx_buffer->clear();
-			// PC TX timeout - data stuck in buffer
-			pc_tx_buffer->put('['); pc_tx_buffer->put('E'); pc_tx_buffer->put('R'); pc_tx_buffer->put('R');
-			pc_tx_buffer->put(':'); pc_tx_buffer->put('P'); pc_tx_buffer->put('C'); pc_tx_buffer->put('T');
-			pc_tx_buffer->put('X'); pc_tx_buffer->put(']'); pc_tx_buffer->put('\n');
 			pc_tx_buffer->complete = true;
 			set_udrie();
 		}
