@@ -41,11 +41,7 @@
 // ============================================================================
 #define SYNC_TIMEOUT_US      500    // 500µs silence = sync detected
 #define RX_TIMEOUT_SYMBOLS   10    // UART RX timeout in bit periods. Was 12, why? check AVR and protocol, whats the optimal value based on protocol and 250000 baud rate?
-#define PRE_TX_DELAY_US       0     // Delay after DE high, before first byte. Setting to 1000 makes slave send blanks, setting to 0 works
-#define FRAME_TIMEOUT_US      0     // Reset if stuck mid-frame (0 = disabled)
-#define POST_TX_DELAY_US      0     // Any delay here causes the slave to send blanks.. why?
-
-#define DELAY_MICRO 0 // Set to 0
+#define FRAME_TIMEOUT_US     6000     // Reset if stuck mid-frame (0 = disabled)
 
 // ============================================================================
 // DEBUG OPTIONS
