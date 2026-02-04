@@ -46,6 +46,7 @@
 #include <Arduino.h>
 #include <driver/uart.h>
 #include <driver/gpio.h>
+#include <driver/periph_ctrl.h>
 #include <hal/uart_ll.h>
 #include <hal/gpio_ll.h>
 #include <soc/uart_struct.h>
@@ -53,6 +54,7 @@
 #include <soc/uart_periph.h>
 #include <esp_timer.h>
 #include <esp_intr_alloc.h>
+#include <esp_rom_gpio.h>
 
 #if UDP_DEBUG_ENABLE
 #include <WiFi.h>
@@ -768,62 +770,74 @@ static void initRS485Hardware() {
     Serial.println("  [1] No DE pin configured");
 #endif
 
-    Serial.println("  [2] Configuring UART...");
     // =========================================================================
-    // UART: Configure for 250kbaud, install driver first for pin config
-    // =========================================================================
-    uart_config_t uart_config = {
-        .baud_rate = RS485_BAUD_RATE,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .rx_flow_ctrl_thresh = 0,
-        .source_clk = UART_CLOCK_SOURCE
-    };
-
-    Serial.println("  [3] Installing UART driver...");
-    // Install driver with minimal buffers (we handle RX in ISR)
-    ESP_ERROR_CHECK(uart_driver_install((uart_port_t)RS485_UART_NUM, 256, 0, 0, NULL, 0));
-    Serial.println("  [3] UART driver installed OK");
-
-    Serial.println("  [4] Configuring UART params...");
-    ESP_ERROR_CHECK(uart_param_config((uart_port_t)RS485_UART_NUM, &uart_config));
-    Serial.println("  [4] UART params configured OK");
-
-    Serial.println("  [5] Setting UART pins...");
-    ESP_ERROR_CHECK(uart_set_pin((uart_port_t)RS485_UART_NUM,
-                                  RS485_TX_PIN, RS485_RX_PIN,
-                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    Serial.println("  [5] UART pins set OK");
-
-    // =========================================================================
-    // Register our own ISR for immediate response
-    // Use uart_isr_register() which properly replaces the driver's ISR
+    // BARE-METAL UART SETUP (no driver - we handle everything ourselves)
+    // This gives us full control and lowest latency like AVR
     // =========================================================================
 
-    Serial.println("  [6] Registering custom UART ISR...");
-    // This frees the driver's ISR and registers our own
-    ESP_ERROR_CHECK(uart_isr_free((uart_port_t)RS485_UART_NUM));
-    ESP_ERROR_CHECK(uart_isr_register((uart_port_t)RS485_UART_NUM,
-                                       uart_isr_handler, NULL,
-                                       ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL1,
-                                       &uartIntrHandle));
-    Serial.println("  [6] Custom UART ISR registered OK");
+    Serial.println("  [2] Enabling UART peripheral clock...");
+    // Enable UART1 peripheral clock
+    periph_module_enable(PERIPH_UART1_MODULE);
+    Serial.println("  [2] UART clock enabled OK");
 
-    Serial.println("  [7] Setting RX FIFO threshold...");
+    Serial.println("  [3] Configuring UART pins...");
+    // Configure TX pin
+    gpio_set_direction((gpio_num_t)RS485_TX_PIN, GPIO_MODE_OUTPUT);
+    esp_rom_gpio_connect_out_signal(RS485_TX_PIN, UART_PERIPH_SIGNAL(1, SOC_UART_TX_PIN_IDX), false, false);
+
+    // Configure RX pin
+    gpio_set_direction((gpio_num_t)RS485_RX_PIN, GPIO_MODE_INPUT);
+    gpio_set_pull_mode((gpio_num_t)RS485_RX_PIN, GPIO_PULLUP_ONLY);
+    esp_rom_gpio_connect_in_signal(RS485_RX_PIN, UART_PERIPH_SIGNAL(1, SOC_UART_RX_PIN_IDX), false);
+    Serial.println("  [3] UART pins configured OK");
+
+    Serial.println("  [4] Configuring UART parameters...");
+    // Reset and configure UART
+    uart_ll_set_reset_core(uartHw, true);
+    uart_ll_set_reset_core(uartHw, false);
+
+    // Set clock source and baud rate
+    uart_ll_set_sclk(uartHw, UART_CLOCK_SOURCE);
+    uint32_t sclk_freq = (UART_CLOCK_SOURCE == UART_SCLK_XTAL) ? 40000000 : 80000000;
+    uart_ll_set_baudrate(uartHw, RS485_BAUD_RATE, sclk_freq);
+
+    // Configure frame format: 8N1
+    uart_ll_set_data_bit_num(uartHw, UART_DATA_8_BITS);
+    uart_ll_set_parity(uartHw, UART_PARITY_DISABLE);
+    uart_ll_set_stop_bits(uartHw, UART_STOP_BITS_1);
+
+    // Disable hardware flow control
+    uart_ll_set_hw_flow_ctrl(uartHw, UART_HW_FLOWCTRL_DISABLE, 0);
+
+    // Enable TX and RX
+    uart_ll_set_tx_idle_num(uartHw, 0);
+    uart_ll_tx_break(uartHw, 0);
+    Serial.println("  [4] UART parameters configured OK");
+
+    Serial.println("  [5] Configuring RX FIFO threshold...");
     // Configure RX FIFO threshold - trigger on every byte for lowest latency
     uart_ll_set_rxfifo_full_thr(uartHw, 1);
-    Serial.println("  [7] RX FIFO threshold set OK");
+    Serial.println("  [5] RX FIFO threshold set OK");
 
-    Serial.println("  [8] Enabling RX FIFO interrupt...");
+    Serial.println("  [6] Clearing and enabling interrupts...");
+    // Clear any pending interrupts
+    uart_ll_clr_intsts_mask(uartHw, UART_LL_INTR_MASK);
+
     // Enable RX FIFO full interrupt
     uart_ll_ena_intr_mask(uartHw, UART_INTR_RXFIFO_FULL);
-    Serial.println("  [8] RX FIFO interrupt enabled OK");
+    Serial.println("  [6] Interrupts configured OK");
+
+    Serial.println("  [7] Registering ISR...");
+    // Register our ISR directly (no driver to conflict with)
+    ESP_ERROR_CHECK(esp_intr_alloc(uart_periph_signal[RS485_UART_NUM].irq,
+                                    ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL1,
+                                    uart_isr_handler, NULL, &uartIntrHandle));
+    Serial.println("  [7] ISR registered OK");
 
     rs485State = STATE_SYNC;
     lastRxTime = esp_timer_get_time();
 
+    Serial.println("  [8] RS485 initialization complete!");
     udpDbgSend("RS485 ISR mode initialized, DE pin=%d", RS485_DE_PIN);
 }
 
