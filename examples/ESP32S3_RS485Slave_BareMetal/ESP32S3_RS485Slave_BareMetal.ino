@@ -94,6 +94,11 @@
 // 1 = Inverted (DE LOW during TX) - some boards have inverters on DE line
 #define RS485_DE_INVERT 0
 
+// DE Control Mode - Try MANUAL if hardware RS485 mode has issues
+// 0 = Hardware RS485 mode (ESP32 controls DE automatically via RTS)
+// 1 = Manual GPIO mode (we control DE pin explicitly - more compatible)
+#define RS485_DE_MANUAL 1
+
 // UART Configuration
 #define RS485_UART_NUM  1        // UART1 (UART0 is typically used for USB/debug)
 #define RS485_BAUD_RATE 250000   // DCS-BIOS standard baud rate
@@ -644,6 +649,30 @@ static volatile int64_t lastRxTime = 0;
 static volatile int64_t frameStartTime = 0;  // Timestamp when current frame started
 static uart_port_t uartNum = (uart_port_t)RS485_UART_NUM;
 
+// ============================================================================
+// MANUAL DE CONTROL HELPERS
+// ============================================================================
+#if RS485_DE_PIN >= 0 && RS485_DE_MANUAL
+static inline void deAssert() {
+    #if RS485_DE_INVERT
+        digitalWrite(RS485_DE_PIN, LOW);   // Inverted: LOW = TX enabled
+    #else
+        digitalWrite(RS485_DE_PIN, HIGH);  // Normal: HIGH = TX enabled
+    #endif
+}
+
+static inline void deRelease() {
+    #if RS485_DE_INVERT
+        digitalWrite(RS485_DE_PIN, HIGH);  // Inverted: HIGH = RX enabled
+    #else
+        digitalWrite(RS485_DE_PIN, LOW);   // Normal: LOW = RX enabled
+    #endif
+}
+#else
+#define deAssert()
+#define deRelease()
+#endif
+
 // Debug counters for periodic status report
 #if UDP_DEBUG_ENABLE
 static uint32_t dbgPollCount = 0;      // Polls received for us
@@ -701,9 +730,38 @@ static void initRS485Hardware() {
                                          UART_TX_BUFFER_SIZE, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(uartNum, &uart_config));
 
-#if RS485_DE_PIN >= 0
+#if RS485_DE_PIN >= 0 && RS485_DE_MANUAL
     // =========================================================================
-    // MODE 1: Hardware DE Control (RS485_DE_PIN is a valid GPIO)
+    // MODE 1: MANUAL DE Control (GPIO-controlled, more compatible)
+    // =========================================================================
+    // TX  → RS485 DI
+    // RX  ← RS485 RO
+    // DE  → Controlled by GPIO (we assert/release manually around TX)
+    //
+    // This mode is MORE COMPATIBLE than hardware RS485 mode because:
+    // - We have explicit control over DE timing
+    // - Works with transceivers that have specific timing requirements
+    // - Avoids ESP32 UART_MODE_RS485_HALF_DUPLEX quirks
+    // =========================================================================
+    ESP_ERROR_CHECK(uart_set_pin(uartNum,
+                                  RS485_TX_PIN,      // TX
+                                  RS485_RX_PIN,      // RX
+                                  UART_PIN_NO_CHANGE,// No RTS (we use GPIO for DE)
+                                  UART_PIN_NO_CHANGE // CTS not used
+                                  ));
+
+    // Use regular UART mode - we control DE manually
+    ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_UART));
+
+    // Configure DE pin as output and set to RX mode (DE released)
+    pinMode(RS485_DE_PIN, OUTPUT);
+    deRelease();
+
+    DBGF("[DE: MANUAL GPIO %d]\n", RS485_DE_PIN);
+
+#elif RS485_DE_PIN >= 0
+    // =========================================================================
+    // MODE 2: Hardware DE Control (RS485_DE_PIN is a valid GPIO)
     // =========================================================================
     // TX  → RS485 DI
     // RX  ← RS485 RO
@@ -726,9 +784,9 @@ static void initRS485Hardware() {
 #if RS485_DE_INVERT
     // Invert DE polarity if needed (some boards have inverters on DE line)
     ESP_ERROR_CHECK(uart_set_line_inverse(uartNum, UART_SIGNAL_RTS_INV));
-    DBGLN("[DE POLARITY: INVERTED]");
+    DBGF("[DE: HARDWARE INVERTED]\n");
 #else
-    DBGLN("[DE POLARITY: NORMAL]");
+    DBGF("[DE: HARDWARE NORMAL]\n");
 #endif
 
 #else
@@ -803,15 +861,17 @@ static void sendResponse() {
     size_t totalBytes = 3 + len;
 
     // =========================================================================
-    // HARDWARE RS485 MAGIC HAPPENS HERE
+    // TRANSMIT WITH DE CONTROL
     // =========================================================================
     // CRITICAL: TX must happen IMMEDIATELY after poll received!
     // Any delay (including debug prints) will cause Master timeout!
     // =========================================================================
+    deAssert();  // Enable transmitter (manual mode) or no-op (hardware mode)
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
 
-    // Wait for TX to complete before returning to RX state
+    // Wait for TX to complete before releasing DE
     esp_err_t txResult = uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+    deRelease();  // Disable transmitter, enable receiver
 
     // Flush any echo bytes
     size_t echoBytes = 0;
@@ -845,9 +905,11 @@ static void sendResponse() {
 static void sendZeroLengthResponse() {
     uint8_t response = 0;
 
-    // Hardware handles DE automatically
+    // Transmit with DE control
+    deAssert();  // Enable transmitter
     uart_write_bytes(uartNum, (const char*)&response, 1);
     esp_err_t txResult = uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
+    deRelease();  // Disable transmitter, enable receiver
 
     // Check for echo (indicates DE timing issue)
     size_t echoBytes = 0;

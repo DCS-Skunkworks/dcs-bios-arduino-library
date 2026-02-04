@@ -68,6 +68,9 @@
 #define BUS1_DE_PIN     21      // Set to -1 for auto-direction transceiver
 #define BUS1_UART_NUM   1       // UART1
 
+// DE Control Mode - Try MANUAL (1) if hardware RS485 mode has issues with your transceiver
+#define RS485_DE_MANUAL 1       // 0 = Hardware RS485 mode, 1 = Manual GPIO mode
+
 // BUS 2 - Secondary RS485 bus (disabled by default)
 #define BUS2_TX_PIN     -1      // Set to valid GPIO to enable
 #define BUS2_RX_PIN     -1
@@ -382,6 +385,15 @@ public:
                                              UART_TX_BUFFER_SIZE, 0, NULL, 0));
         ESP_ERROR_CHECK(uart_param_config(uartNum, &uart_config));
 
+#if RS485_DE_MANUAL
+        // Manual DE mode - use regular UART and control DE via GPIO
+        ESP_ERROR_CHECK(uart_set_pin(uartNum, txPin, rxPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+        ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_UART));
+        if (dePin >= 0) {
+            pinMode(dePin, OUTPUT);
+            digitalWrite(dePin, LOW);  // Start in RX mode
+        }
+#else
         if (dePin >= 0) {
             // Hardware RS485 mode with automatic DE control
             ESP_ERROR_CHECK(uart_set_pin(uartNum, txPin, rxPin, dePin, UART_PIN_NO_CHANGE));
@@ -391,11 +403,14 @@ public:
             ESP_ERROR_CHECK(uart_set_pin(uartNum, txPin, rxPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
             ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_UART));
         }
+#endif
 
         uart_flush_input(uartNum);
         state = STATE_IDLE;
         lastPollTime = esp_timer_get_time();
     }
+
+    int getDePin() const { return dePin; }
 
     void advancePollAddress() {
         // Advance through address range, wrapping at MAX_SLAVE_ADDRESS
@@ -653,21 +668,36 @@ static void txTask(void* param) {
 
     while (true) {
         if (xQueueReceive(txQueue, &request, portMAX_DELAY) == pdTRUE) {
+            // Find the bus that owns this UART
+            RS485Master* bus = RS485Master::first;
+            while (bus != nullptr) {
+                if (bus->getUartNum() == request.uartNum) {
+                    break;
+                }
+                bus = bus->next;
+            }
+
+#if RS485_DE_MANUAL
+            // Manual DE control - assert before TX
+            if (bus && bus->getDePin() >= 0) {
+                digitalWrite(bus->getDePin(), HIGH);  // Enable transmitter
+            }
+#endif
+
             // Send on the specified UART
             uart_write_bytes(request.uartNum, (const char*)request.data, request.length);
             uart_wait_tx_done(request.uartNum, pdMS_TO_TICKS(50));
 
-            // NOTE: Don't flush here - ESP32 RS485 half-duplex mode disables RX during TX
-            // Flushing here could remove the slave's response if timing is tight
+#if RS485_DE_MANUAL
+            // Manual DE control - release after TX
+            if (bus && bus->getDePin() >= 0) {
+                digitalWrite(bus->getDePin(), LOW);   // Enable receiver
+            }
+#endif
 
-            // Find the bus that owns this UART and clear its txBusy flag
-            RS485Master* bus = RS485Master::first;
-            while (bus != nullptr) {
-                if (bus->getUartNum() == request.uartNum) {
-                    bus->clearTxBusy();
-                    break;
-                }
-                bus = bus->next;
+            // Clear txBusy flag
+            if (bus) {
+                bus->clearTxBusy();
             }
         }
     }
