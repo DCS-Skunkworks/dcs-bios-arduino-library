@@ -69,7 +69,7 @@
 #define BUS1_UART_NUM   1       // UART1
 
 // DE Control Mode - Try MANUAL (1) if hardware RS485 mode has issues with your transceiver
-#define RS485_DE_MANUAL 1       // 0 = Hardware RS485 mode, 1 = Manual GPIO mode
+#define RS485_DE_MANUAL 0       // 0 = Hardware RS485 mode, 1 = Manual GPIO mode
 
 // BUS 2 - Secondary RS485 bus (disabled by default)
 #define BUS2_TX_PIN     -1      // Set to valid GPIO to enable
