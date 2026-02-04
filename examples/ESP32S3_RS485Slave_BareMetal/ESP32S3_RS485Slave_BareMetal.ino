@@ -719,7 +719,7 @@ static void initRS485Hardware() {
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .rx_flow_ctrl_thresh = 0,
-        .source_clk = UART_SCLK_DEFAULT  // Use default clock source
+        .source_clk = UART_SCLK_XTAL  // Crystal oscillator - most stable for accurate baud rate
     };
 
     // Install UART driver (no event queue needed for basic operation)
