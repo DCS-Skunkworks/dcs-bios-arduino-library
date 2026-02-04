@@ -859,9 +859,13 @@ static void sendResponse() {
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
 
-    // CRITICAL: Discard echo - unlike AVR which disables RX during TX,
-    // ESP32 may receive its own transmission. Without this, our TX bytes
-    // would be parsed as incoming messages, causing garbage/corruption.
+    // Wait for echo to fully arrive before flushing (1 byte = 40µs at 250kbaud)
+    // Without this delay, the last 1-2 bytes of echo may still be in transit
+    // and would miss the flush, causing corruption on rapid button presses
+    delayMicroseconds(100);
+
+    // Discard echo - unlike AVR which disables RX during TX,
+    // ESP32 may receive its own transmission
     uart_flush_input(uartNum);
 
     // Clear message buffer and return to RX state
@@ -883,7 +887,10 @@ static void sendZeroLengthResponse() {
     uart_write_bytes(uartNum, (const char*)&response, 1);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
 
-    // Discard echo (same reason as sendResponse)
+    // Wait for echo to fully arrive before flushing
+    delayMicroseconds(100);
+
+    // Discard echo
     uart_flush_input(uartNum);
 
     rs485State = STATE_RX_WAIT_ADDRESS;
