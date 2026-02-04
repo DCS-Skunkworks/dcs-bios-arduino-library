@@ -94,10 +94,11 @@
 // 1 = Inverted (DE LOW during TX) - some boards have inverters on DE line
 #define RS485_DE_INVERT 0
 
-// DE Control Mode - Try MANUAL if hardware RS485 mode has issues
+// DE Control Mode (only used when RS485_DE_PIN >= 0)
 // 0 = Hardware RS485 mode (ESP32 controls DE automatically via RTS)
 // 1 = Manual GPIO mode (we control DE pin explicitly - more compatible)
-#define RS485_DE_MANUAL 1
+// Note: Ignored when RS485_DE_PIN = -1 (auto-direction mode)
+#define RS485_DE_MANUAL 0
 
 // UART Configuration
 #define RS485_UART_NUM  1        // UART1 (UART0 is typically used for USB/debug)
