@@ -560,8 +560,11 @@ static void initRS485Hardware() {
 }
 
 // ============================================================================
-// TX HANDLING - MANUAL DE CONTROL (like ESP32 Master)
+// TX HANDLING - CRITICAL SECTION TO PREVENT WIFI/ISR INTERFERENCE
 // ============================================================================
+
+// Spinlock for critical sections - prevents WiFi/radio ISRs from corrupting TX timing
+static portMUX_TYPE txMutex = portMUX_INITIALIZER_UNLOCKED;
 
 static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
@@ -579,24 +582,29 @@ static void sendResponse() {
     size_t totalBytes = 3 + len;
 
     // =========================================================================
-    // MANUAL DE CONTROL SEQUENCE:
-    // 1. Set DE HIGH (enable transmitter)
-    // 2. Wait for DE to stabilize before TX starts
-    // 3. Write all bytes to UART FIFO at once
-    // 4. Wait for TX to complete (all bytes shifted out)
-    // 5. Set DE LOW (return to receive mode)
+    // CRITICAL SECTION: Disable ALL interrupts during TX
+    // This prevents WiFi/radio ISRs from disrupting the precise timing
+    // The AVR doesn't have this problem because it has no WiFi running!
     // =========================================================================
+    portENTER_CRITICAL(&txMutex);
+
 #if RS485_DE_PIN >= 0
     setDE(true);
     delayMicroseconds(MICROSECOND_DELAY);  // Let DE stabilize before first byte
 #endif
 
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
-    ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
+
+    // Busy-wait for TX done inside critical section (can't use FreeRTOS wait)
+    while (!uart_ll_is_tx_idle(&UART1)) {
+        // Spin until TX shift register is empty
+    }
 
 #if RS485_DE_PIN >= 0
     setDE(false);  // Return to RX mode
 #endif
+
+    portEXIT_CRITICAL(&txMutex);
 
     messageBuffer.clear();
     messageBuffer.complete = false;
@@ -608,17 +616,24 @@ static void sendResponse() {
 static void sendZeroLengthResponse() {
     uint8_t response = 0;
 
+    portENTER_CRITICAL(&txMutex);
+
 #if RS485_DE_PIN >= 0
     setDE(true);
     delayMicroseconds(MICROSECOND_DELAY);
 #endif
 
     uart_write_bytes(uartNum, (const char*)&response, 1);
-    ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
+
+    while (!uart_ll_is_tx_idle(&UART1)) {
+        // Spin until TX shift register is empty
+    }
 
 #if RS485_DE_PIN >= 0
     setDE(false);
 #endif
+
+    portEXIT_CRITICAL(&txMutex);
 
     rs485State = STATE_RX_WAIT_ADDRESS;
 }
