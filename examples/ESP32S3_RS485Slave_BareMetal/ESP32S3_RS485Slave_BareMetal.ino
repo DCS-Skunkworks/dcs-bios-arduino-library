@@ -615,6 +615,10 @@ static void sendResponse() {
         // Spin until last bit shifted out
     }
 
+    // Small delay after last bit to ensure stop bit fully transmitted
+    // before releasing the bus (AVR has similar timing due to ISR latency)
+    delayMicroseconds(5);
+
 #if RS485_DE_PIN >= 0
     setDE(false);  // Return to RX mode
 #endif
@@ -644,6 +648,8 @@ static void sendZeroLengthResponse() {
         // Spin until last bit shifted out
     }
 
+    delayMicroseconds(5);  // Ensure stop bit fully transmitted
+
 #if RS485_DE_PIN >= 0
     setDE(false);
 #endif
@@ -660,12 +666,13 @@ static void sendZeroLengthResponse() {
 static void processRS485() {
     int64_t now = esp_timer_get_time();
 
-    // Frame timeout - reset if stuck mid-frame too long
-    if (rs485State != STATE_SYNC && (now - lastRxTime) >= RX_FRAME_TIMEOUT_US) {
-        rs485State = STATE_SYNC;
-    }
+    // =========================================================================
+    // NO FRAME TIMEOUT - AVR slave doesn't have one!
+    // The AVR relies purely on byte-driven state machine + 500µs SYNC gap.
+    // Our previous 5000/6000µs timeout was causing issues with long exports.
+    // =========================================================================
 
-    // Sync detection - 500µs silence means ready for new frame
+    // Sync detection - 500µs silence means ready for new frame (like AVR)
     if (rs485State == STATE_SYNC && (now - lastRxTime) >= SYNC_TIMEOUT_US) {
         rs485State = STATE_RX_WAIT_ADDRESS;
     }
