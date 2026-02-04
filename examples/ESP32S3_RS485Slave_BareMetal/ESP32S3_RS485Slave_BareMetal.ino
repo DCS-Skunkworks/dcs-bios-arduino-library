@@ -25,7 +25,7 @@
 //   UART_SCLK_XTAL    - Crystal clock (40MHz) - more stable
 //   UART_SCLK_RTC     - RTC clock (8MHz) - low power but less accurate
 // ============================================================================
-#define UART_CLOCK_SOURCE   UART_SCLK_DEFAULT
+#define UART_CLOCK_SOURCE   UART_SCLK_XTAL
 
 // Buffer Sizes
 #define UART_RX_BUFFER_SIZE    512
@@ -36,10 +36,10 @@
 // TIMING CONFIGURATION - Tweak these to debug corruption issues
 // ============================================================================
 #define SYNC_TIMEOUT_US      500    // 500µs silence = sync detected
-#define RX_TIMEOUT_SYMBOLS   12     // UART RX timeout in bit periods
-#define FRAME_TIMEOUT_US     6000   // Reset if stuck mid-frame (0 = disabled)
-#define PRE_TX_DELAY_US      40     // Delay after DE high, before first byte
-#define POST_TX_DELAY_US     5      // Delay after last byte, before DE low
+#define RX_TIMEOUT_SYMBOLS   10    // UART RX timeout in bit periods. Was 12, why? check AVR and protocol, whats the optimal value based on protocol and 250000 baud rate?
+#define PRE_TX_DELAY_US       0     // Delay after DE high, before first byte. Setting to 1000 makes slave send blanks, setting to 0 works
+#define FRAME_TIMEOUT_US      0     // Reset if stuck mid-frame (0 = disabled)
+#define POST_TX_DELAY_US      0     // Any delay here causes the slave to send blanks.. why?
 
 // ============================================================================
 // DEBUG OPTIONS
