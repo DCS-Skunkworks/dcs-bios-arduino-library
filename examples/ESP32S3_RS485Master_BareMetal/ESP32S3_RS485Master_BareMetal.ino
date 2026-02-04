@@ -688,8 +688,9 @@ static void txTask(void* param) {
             }
 #endif
 
-            // Small turnaround delay - don't flush here, response may be arriving!
-            delayMicroseconds(20);
+            // Turnaround delay to ensure receiver is ready
+            // Don't flush here - the Slave's response may be arriving!
+            delayMicroseconds(50);
 
             // Clear txBusy flag
             if (bus) {

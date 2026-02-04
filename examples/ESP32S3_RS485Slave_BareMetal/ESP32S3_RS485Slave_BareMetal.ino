@@ -863,9 +863,11 @@ static void sendResponse() {
     // =========================================================================
     // TRANSMIT WITH DE CONTROL
     // =========================================================================
-    // Small turnaround delay to let the bus settle after Master's poll
+    // Turnaround delay to let the bus settle after Master's poll
     // This prevents the first byte from being corrupted during bus transition
-    delayMicroseconds(200);  // 50µs turnaround time
+    // The Master needs time to: release DE, settle bus voltage, enable RX
+    // 500µs provides ample margin for all these transitions
+    delayMicroseconds(500);  // 500µs turnaround time
 
     deAssert();  // Enable transmitter (manual mode) or no-op (hardware mode)
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
@@ -915,8 +917,8 @@ static void sendResponse() {
 static void sendZeroLengthResponse() {
     uint8_t response = 0;
 
-    // Small turnaround delay to let the bus settle
-    delayMicroseconds(200);
+    // Turnaround delay to let the bus settle (must match sendResponse)
+    delayMicroseconds(500);
 
     // Transmit with DE control
     deAssert();  // Enable transmitter
