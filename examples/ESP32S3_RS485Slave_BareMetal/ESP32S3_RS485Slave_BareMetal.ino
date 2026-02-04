@@ -560,11 +560,25 @@ static void initRS485Hardware() {
 }
 
 // ============================================================================
-// TX HANDLING - CRITICAL SECTION TO PREVENT WIFI/ISR INTERFERENCE
+// TX HANDLING - DIRECT FIFO ACCESS WITH CRITICAL SECTION
 // ============================================================================
 
 // Spinlock for critical sections - prevents WiFi/radio ISRs from corrupting TX timing
 static portMUX_TYPE txMutex = portMUX_INITIALIZER_UNLOCKED;
+
+// Get the hardware UART device pointer for direct register access
+static uart_dev_t* const uartHw = &UART1;
+
+// Write bytes directly to UART FIFO - NO FreeRTOS, safe in critical section
+static void writeToFifo(const uint8_t* data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        // Wait for space in FIFO (128 bytes on ESP32-S3)
+        while (uart_ll_get_txfifo_len(uartHw) == 0) {
+            // Spin
+        }
+        uart_ll_write_txfifo(uartHw, &data[i], 1);
+    }
+}
 
 static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
@@ -583,8 +597,8 @@ static void sendResponse() {
 
     // =========================================================================
     // CRITICAL SECTION: Disable ALL interrupts during TX
-    // This prevents WiFi/radio ISRs from disrupting the precise timing
-    // The AVR doesn't have this problem because it has no WiFi running!
+    // Uses direct FIFO writes - uart_write_bytes() uses FreeRTOS semaphores
+    // which CANNOT be called inside critical sections!
     // =========================================================================
     portENTER_CRITICAL(&txMutex);
 
@@ -593,11 +607,12 @@ static void sendResponse() {
     delayMicroseconds(MICROSECOND_DELAY);  // Let DE stabilize before first byte
 #endif
 
-    uart_write_bytes(uartNum, (const char*)packet, totalBytes);
+    // Direct FIFO write - no FreeRTOS calls
+    writeToFifo(packet, totalBytes);
 
-    // Busy-wait for TX done inside critical section (can't use FreeRTOS wait)
-    while (!uart_ll_is_tx_idle(&UART1)) {
-        // Spin until TX shift register is empty
+    // Busy-wait for TX shift register to empty
+    while (!uart_ll_is_tx_idle(uartHw)) {
+        // Spin until last bit shifted out
     }
 
 #if RS485_DE_PIN >= 0
@@ -623,10 +638,10 @@ static void sendZeroLengthResponse() {
     delayMicroseconds(MICROSECOND_DELAY);
 #endif
 
-    uart_write_bytes(uartNum, (const char*)&response, 1);
+    writeToFifo(&response, 1);
 
-    while (!uart_ll_is_tx_idle(&UART1)) {
-        // Spin until TX shift register is empty
+    while (!uart_ll_is_tx_idle(uartHw)) {
+        // Spin until last bit shifted out
     }
 
 #if RS485_DE_PIN >= 0
