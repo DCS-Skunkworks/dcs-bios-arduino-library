@@ -550,6 +550,11 @@ static void initRS485Hardware() {
     // - Handles timing at hardware level (more precise than software)
     ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX));
 
+    // CRITICAL: Invert RTS signal polarity
+    // ESP32's RTS is active LOW by default, but MAX13488E needs DE HIGH to transmit
+    // Without this, DE stays LOW and transceiver never enables TX driver
+    ESP_ERROR_CHECK(uart_set_line_inverse(uartNum, UART_SIGNAL_RTS_INV));
+
     ESP_ERROR_CHECK(uart_set_rx_timeout(uartNum, RX_TIMEOUT_SYMBOLS));
     uart_flush_input(uartNum);
 
