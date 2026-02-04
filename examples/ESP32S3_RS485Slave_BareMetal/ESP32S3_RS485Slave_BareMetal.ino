@@ -545,7 +545,7 @@ static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
     uint8_t len = messageBuffer.getLength();
 
-    packet[0] = len + 1;  // Length includes msgtype
+    packet[0] = len;      // Length = DATA bytes only (NOT including msgtype!)
     packet[1] = 0;        // Message type = 0
 
     for (uint8_t i = 0; i < len; i++) {
