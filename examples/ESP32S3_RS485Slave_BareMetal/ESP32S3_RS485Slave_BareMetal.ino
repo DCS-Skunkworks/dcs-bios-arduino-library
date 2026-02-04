@@ -982,6 +982,25 @@ static void processRS485() {
     }
 
     // =========================================================================
+    // Message Buffer Timeout - Clear stuck messages after 1 second
+    // =========================================================================
+    // If a message has been queued but not sent (no poll received), clear it
+    // to prevent permanent "buffer busy" blocking.
+    static int64_t messageQueuedTime = 0;
+    if (messageBuffer.complete) {
+        if (messageQueuedTime == 0) {
+            messageQueuedTime = now;  // Start timeout timer
+        } else if ((now - messageQueuedTime) > 1000000) {  // 1 second timeout
+            DBGLN("[MSG TIMEOUT - clearing stuck buffer]");
+            messageBuffer.clear();
+            messageBuffer.complete = false;
+            messageQueuedTime = 0;
+        }
+    } else {
+        messageQueuedTime = 0;  // Reset timer when buffer is free
+    }
+
+    // =========================================================================
     // Process all available RX bytes
     // =========================================================================
     size_t available = 0;
