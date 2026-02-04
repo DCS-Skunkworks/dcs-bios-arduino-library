@@ -861,13 +861,18 @@ static void sendResponse() {
     size_t totalBytes = 3 + len;
 
     // =========================================================================
-    // TRANSMIT WITH DE CONTROL
+    // TRANSMIT WITH DE CONTROL (matches AVR set_txen/clear_txen behavior)
     // =========================================================================
+    // AVR disables RX before TX, then re-enables after TX complete.
+    // We emulate this by flushing RX BEFORE TX, then discarding echo bytes.
+
     // Turnaround delay to let the bus settle after Master's poll
-    // This prevents the first byte from being corrupted during bus transition
-    // The Master needs time to: release DE, settle bus voltage, enable RX
-    // 500µs provides ample margin for all these transitions
     delayMicroseconds(500);  // 500µs turnaround time
+
+#if RS485_DE_MANUAL
+    // Flush any stale RX data BEFORE we start transmitting
+    uart_flush_input(uartNum);
+#endif
 
     deAssert();  // Enable transmitter (manual mode) or no-op (hardware mode)
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
@@ -880,14 +885,21 @@ static void sendResponse() {
     delayMicroseconds(10);
     deRelease();
 
-    // Flush echo bytes (in manual mode, we receive our own TX)
+    // Discard exactly the echo bytes we sent - DO NOT flush (would lose Master's poll!)
+    // Wait a bit for echo bytes to arrive in buffer
+    delayMicroseconds(100);
+    uint8_t discardBuf[32];
     size_t echoBytes = 0;
     uart_get_buffered_data_len(uartNum, &echoBytes);
-    uart_flush_input(uartNum);
+    // Read and discard up to totalBytes (our echo) - don't read more!
+    size_t toDiscard = (echoBytes > totalBytes) ? totalBytes : echoBytes;
+    if (toDiscard > 0) {
+        uart_read_bytes(uartNum, discardBuf, toDiscard, 0);
+    }
 #else
     // Hardware RS485 mode: RX should be disabled during TX, no echo to flush
-    // DO NOT flush - it might remove valid incoming data!
     size_t echoBytes = 0;
+    size_t toDiscard = 0;
 #endif
 
     // Reset timing reference after TX
@@ -902,8 +914,8 @@ static void sendResponse() {
 
     // DEBUG: Print AFTER TX is complete (doesn't affect timing!)
     DBGF("[TX SENT %d bytes", totalBytes);
-    if (echoBytes > 0) {
-        DBGF(" echo=%d", echoBytes);
+    if (toDiscard > 0) {
+        DBGF(" echo=%d/%d", toDiscard, echoBytes);
     }
     if (txResult != 0) {
         DBGF(" err=%d", txResult);
@@ -920,6 +932,11 @@ static void sendZeroLengthResponse() {
     // Turnaround delay to let the bus settle (must match sendResponse)
     delayMicroseconds(500);
 
+#if RS485_DE_MANUAL
+    // Flush any stale RX data BEFORE we start transmitting
+    uart_flush_input(uartNum);
+#endif
+
     // Transmit with DE control
     deAssert();  // Enable transmitter
     uart_write_bytes(uartNum, (const char*)&response, 1);
@@ -928,7 +945,15 @@ static void sendZeroLengthResponse() {
 #if RS485_DE_MANUAL
     delayMicroseconds(10);  // Ensure stop bit completes
     deRelease();  // Disable transmitter, enable receiver
-    uart_flush_input(uartNum);  // Flush echo bytes
+
+    // Discard exactly 1 echo byte - DO NOT flush (would lose Master's poll!)
+    delayMicroseconds(100);
+    uint8_t discardBuf[4];
+    size_t available = 0;
+    uart_get_buffered_data_len(uartNum, &available);
+    if (available > 0) {
+        uart_read_bytes(uartNum, discardBuf, 1, 0);  // Discard our 1 echo byte
+    }
 #endif
     // Hardware RS485 mode: no flush needed, RX disabled during TX
 

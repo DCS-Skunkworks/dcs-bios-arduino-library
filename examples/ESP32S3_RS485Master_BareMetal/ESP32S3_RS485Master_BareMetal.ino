@@ -122,6 +122,10 @@
 #define MIN_SLAVE_ADDRESS   1       // First slave address to poll
 #define MAX_SLAVE_ADDRESS   1       // Last slave address to poll (set to 1 for single slave testing)
 
+// DEBUG: Suppress broadcasts to test if bus congestion is the issue
+// Set to 1 to disable all broadcasts (only polling will occur)
+#define SUPPRESS_BROADCASTS 1       // 0 = normal, 1 = disable broadcasts for testing
+
 // Internal array size - don't change
 #define MAX_SLAVES          128
 
@@ -496,10 +500,18 @@ public:
 
         switch (state) {
             case STATE_IDLE:
+#if !SUPPRESS_BROADCASTS
+                // Only send broadcasts if not suppressed
                 if (exportData.isNotEmpty() && (now - lastPollTime) < MAX_POLL_INTERVAL_US) {
                     sendBroadcast();
                     return;
                 }
+#else
+                // Broadcasts suppressed - just discard any export data
+                while (exportData.isNotEmpty()) {
+                    exportData.get();
+                }
+#endif
                 if (messageBuffer.isEmpty() && !messageBuffer.complete) {
                     advancePollAddress();
                     sendPoll(currentPollAddress);
@@ -665,12 +677,11 @@ static void txTask(void* param) {
             }
 
             // Flush any stale data from RX buffer BEFORE sending
-            // This clears leftover data from previous cycles without
-            // risking removal of the Slave's response
+            // This clears leftover data from previous cycles
             uart_flush_input(request.uartNum);
 
 #if RS485_DE_MANUAL
-            // Manual DE control - assert before TX
+            // Manual DE control - assert before TX (matches AVR set_txen behavior)
             if (bus && bus->getDePin() >= 0) {
                 digitalWrite(bus->getDePin(), HIGH);  // Enable transmitter
             }
@@ -681,15 +692,26 @@ static void txTask(void* param) {
             uart_wait_tx_done(request.uartNum, pdMS_TO_TICKS(50));
 
 #if RS485_DE_MANUAL
-            // Manual DE control - release after TX
+            // Manual DE control - release after TX (matches AVR clear_txen behavior)
             if (bus && bus->getDePin() >= 0) {
                 delayMicroseconds(10);  // Ensure stop bit completes
                 digitalWrite(bus->getDePin(), LOW);   // Enable receiver
             }
+
+            // Discard echo bytes - we receive our own TX in manual mode
+            // Wait for echo bytes to arrive, then discard exactly what we sent
+            delayMicroseconds(100);
+            uint8_t discardBuf[32];
+            size_t available = 0;
+            uart_get_buffered_data_len(request.uartNum, &available);
+            // Read and discard up to request.length (our echo) - don't read more!
+            size_t toDiscard = (available > request.length) ? request.length : available;
+            if (toDiscard > 0) {
+                uart_read_bytes(request.uartNum, discardBuf, toDiscard, 0);
+            }
 #endif
 
-            // Turnaround delay to ensure receiver is ready
-            // Don't flush here - the Slave's response may be arriving!
+            // Small turnaround delay
             delayMicroseconds(50);
 
             // Clear txBusy flag
