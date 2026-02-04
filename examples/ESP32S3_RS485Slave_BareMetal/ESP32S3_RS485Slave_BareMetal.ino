@@ -1,10 +1,14 @@
 /**
- * ESP32-S3 RS485 SLAVE - HARDWARE RS485 MODE
+ * ESP32-S3 RS485 SLAVE - BYTE-BY-BYTE TX (AVR-style)
  *
- * Key changes:
- * 1. Uses UART_MODE_RS485_HALF_DUPLEX for hardware-controlled DE timing
- * 2. DE pin is controlled by UART hardware, not GPIO - more precise timing
- * 3. Protocol: Length byte = DATA bytes only (not including msgtype)
+ * Key design:
+ * 1. Manual DE control via GPIO (not hardware RS485 mode)
+ * 2. Byte-by-byte TX matching AVR's UDRE interrupt approach
+ * 3. Natural inter-byte gaps provide "organic yields" for parallelism
+ * 4. Protocol: Length byte = DATA bytes only (not including msgtype)
+ *
+ * This approach matches how DCS-BIOS protocol was designed - the byte-by-byte
+ * processing allows state machines to work efficiently with natural sync points.
  */
 
 #define SLAVE_ADDRESS 1
@@ -512,14 +516,38 @@ static volatile int64_t lastRxTime = 0;
 static uart_port_t uartNum = (uart_port_t)RS485_UART_NUM;
 
 // ============================================================================
-// HARDWARE RS485 MODE - UART controls DE timing automatically
+// MANUAL DE CONTROL + BYTE-BY-BYTE TX (AVR-style)
 // ============================================================================
+//
+// DCS-BIOS protocol is designed around byte-by-byte processing.
+// The natural inter-byte gaps provide synchronization and allow parallelism.
+// This matches the AVR's UDRE interrupt-driven approach.
+// ============================================================================
+
+static gpio_num_t dePin = (gpio_num_t)RS485_DE_PIN;
+
+static inline void setDE(bool high) {
+    gpio_set_level(dePin, high ? 1 : 0);
+}
 
 static void initRS485Hardware() {
     // =========================================================================
-    // UART Configuration with Hardware RS485 mode
-    // The UART peripheral will control the DE pin automatically with precise
-    // hardware timing - no software delays or GPIO manipulation needed
+    // GPIO: Manual DE pin control
+    // =========================================================================
+#if RS485_DE_PIN >= 0
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << dePin),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io_conf);
+    setDE(false);  // Start in RX mode
+#endif
+
+    // =========================================================================
+    // UART: Normal mode with manual DE control
     // =========================================================================
     uart_config_t uart_config = {
         .baud_rate = RS485_BAUD_RATE,
@@ -535,20 +563,15 @@ static void initRS485Hardware() {
                                          UART_TX_BUFFER_SIZE, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(uartNum, &uart_config));
 
-    // Set pins WITH RTS pin for hardware DE control
-    // In RS485 mode, RTS pin is used as DE (Driver Enable)
+    // Set pins WITHOUT RTS - we control DE manually
     ESP_ERROR_CHECK(uart_set_pin(uartNum,
                                   RS485_TX_PIN,
                                   RS485_RX_PIN,
-                                  RS485_DE_PIN,    // RTS = DE pin
+                                  UART_PIN_NO_CHANGE,
                                   UART_PIN_NO_CHANGE));
 
-    // Use hardware RS485 half-duplex mode
-    // This mode automatically:
-    // - Asserts DE before TX starts
-    // - Deasserts DE after TX completes
-    // - Handles timing at hardware level (more precise than software)
-    ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX));
+    // Normal UART mode (not RS485 auto mode)
+    ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_UART));
 
     ESP_ERROR_CHECK(uart_set_rx_timeout(uartNum, RX_TIMEOUT_SYMBOLS));
     uart_flush_input(uartNum);
@@ -556,17 +579,36 @@ static void initRS485Hardware() {
     rs485State = STATE_SYNC;
     lastRxTime = esp_timer_get_time();
 
-    udpDbgSend("RS485 HW mode enabled, DE pin=%d", RS485_DE_PIN);
+    udpDbgSend("RS485 manual DE mode, pin=%d", RS485_DE_PIN);
 }
 
 // ============================================================================
-// TX HANDLING - HARDWARE RS485 MODE
+// TX HANDLING - BYTE-BY-BYTE (AVR-style)
 // ============================================================================
 //
-// With UART_MODE_RS485_HALF_DUPLEX, the hardware automatically controls DE.
-// IMPORTANT: Must use uart_write_bytes() (not direct FIFO writes) for the
-// driver to properly trigger hardware RS485 DE control.
+// DCS-BIOS protocol is designed for byte-by-byte processing.
+// Like AVR's UDRE interrupt approach:
+// 1. Assert DE (enable driver)
+// 2. Send one byte, wait for TX complete
+// 3. Repeat for all bytes
+// 4. Deassert DE (back to receive mode)
+//
+// The natural inter-byte gaps provide "organic yields" for parallelism.
 // ============================================================================
+
+// Spinlock for critical sections
+static portMUX_TYPE txMutex = portMUX_INITIALIZER_UNLOCKED;
+
+// Direct hardware access for precise timing
+static uart_dev_t* const uartHw = &UART1;
+
+// Send ONE byte and wait for it to complete (like AVR TXC)
+static inline void txByte(uint8_t c) {
+    uart_ll_write_txfifo(uartHw, &c, 1);
+    while (!uart_ll_is_tx_idle(uartHw)) {
+        // Spin until byte is fully transmitted
+    }
+}
 
 static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
@@ -583,21 +625,36 @@ static void sendResponse() {
 
     size_t totalBytes = 3 + len;
 
-    // Use uart_write_bytes() which properly triggers hardware RS485 DE control
-    // Note: No critical section since uart_write_bytes uses FreeRTOS internally
-    uart_write_bytes(uartNum, packet, totalBytes);
+    // =========================================================================
+    // CRITICAL SECTION - Byte-by-byte TX like AVR
+    // DE stays HIGH throughout, bytes sent one at a time
+    // =========================================================================
+    portENTER_CRITICAL(&txMutex);
 
-    // Wait for transmission to complete
-    ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(100)));
+#if RS485_DE_PIN >= 0
+    setDE(true);  // Enable driver
+#endif
 
-    // Flush any RX echo from our own transmission
-    uart_flush_input(uartNum);
+    // Send bytes one-by-one, waiting for each to complete
+    // This matches AVR's interrupt-driven byte-by-byte approach
+    for (size_t i = 0; i < totalBytes; i++) {
+        txByte(packet[i]);
+    }
+
+#if RS485_DE_PIN >= 0
+    setDE(false);  // Back to receive mode
+#endif
+
+    // Flush any RX echo
+    uart_ll_rxfifo_rst(uartHw);
+
+    portEXIT_CRITICAL(&txMutex);
 
     messageBuffer.clear();
     messageBuffer.complete = false;
     rs485State = STATE_RX_WAIT_ADDRESS;
 
-    // Debug logging - show actual bytes transmitted
+    // Debug logging
 #if DEBUG_TX_HEX
     static char hexBuf[128];
     int pos = snprintf(hexBuf, sizeof(hexBuf), "TX[%d]: ", (int)totalBytes);
@@ -611,12 +668,21 @@ static void sendResponse() {
 }
 
 static void sendZeroLengthResponse() {
-    uint8_t zero = 0;
+    portENTER_CRITICAL(&txMutex);
 
-    // Use uart_write_bytes() for proper hardware RS485 DE control
-    uart_write_bytes(uartNum, &zero, 1);
-    ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(100)));
-    uart_flush_input(uartNum);
+#if RS485_DE_PIN >= 0
+    setDE(true);
+#endif
+
+    txByte(0);  // Zero-length response
+
+#if RS485_DE_PIN >= 0
+    setDE(false);
+#endif
+
+    uart_ll_rxfifo_rst(uartHw);
+
+    portEXIT_CRITICAL(&txMutex);
 
     rs485State = STATE_RX_WAIT_ADDRESS;
 }
