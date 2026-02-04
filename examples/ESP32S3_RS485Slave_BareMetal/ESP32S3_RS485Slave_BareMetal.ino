@@ -810,13 +810,12 @@ static void initRS485Hardware() {
 #endif
 
     // =========================================================================
-    // TX IDLE CONFIGURATION - CRITICAL for auto-direction transceivers
+    // TX IDLE CONFIGURATION
     // =========================================================================
-    // Add idle symbols BEFORE TX data starts. This gives the auto-direction
-    // transceiver time to detect TX activity and switch to TX mode before
-    // the actual data bits arrive. Without this, the first byte gets corrupted.
-    // At 250kbaud: 1 symbol = 40µs. 10 symbols = 400µs idle before data.
-    uart_set_tx_idle_num(uartNum, 10);
+    // uart_set_tx_idle_num() adds idle time AFTER transmission (between frames)
+    // NOT before! For auto-direction transceivers, the wakeupAutoDirectionTransceiver()
+    // function handles pre-TX timing by pulsing the TX line to trigger the switch.
+    uart_set_tx_idle_num(uartNum, 2);  // Small inter-frame gap
 
     // =========================================================================
     // RX TIMEOUT CONFIGURATION
@@ -846,6 +845,41 @@ static void initRS485Hardware() {
  * For hardware RS485 mode, the UART peripheral handles DE automatically.
  */
 static uint32_t txSeqNum = 0;  // Sequence number to track transmissions
+
+/**
+ * wakeupAutoDirectionTransceiver() - Trigger transceiver switch before data
+ *
+ * Auto-direction transceivers detect TX activity to switch from RX to TX mode.
+ * This switching takes time (~10-20µs). If we just send data, the first bits
+ * are transmitted DURING the switch and get corrupted.
+ *
+ * Solution: Generate a brief "wake-up" pulse on TX line to trigger the switch,
+ * wait for it to complete, then send real data.
+ *
+ * The AVR does this implicitly with tx_delay_byte() which sends 0x00 on TX
+ * but doesn't assert DE, creating ~40µs delay. We can't do that with auto-dir,
+ * so we manually pulse the line.
+ */
+#if RS485_DE_PIN < 0  // Only for auto-direction mode
+static void wakeupAutoDirectionTransceiver() {
+    // Temporarily take control of TX pin from UART
+    gpio_set_direction((gpio_num_t)RS485_TX_PIN, GPIO_MODE_OUTPUT);
+
+    // Pull LOW briefly - this triggers the transceiver to switch to TX mode
+    // This looks like a start bit to the transceiver
+    gpio_set_level((gpio_num_t)RS485_TX_PIN, 0);
+    delayMicroseconds(20);  // ~0.5 bit time at 250kbaud, enough to trigger
+
+    // Return to HIGH (idle/mark state) - this looks like the rest of a frame
+    // The transceiver should now be fully in TX mode
+    gpio_set_level((gpio_num_t)RS485_TX_PIN, 1);
+    delayMicroseconds(60);  // Let transceiver fully settle (~1.5 bit times)
+
+    // Give TX pin back to UART peripheral
+    // The ESP-IDF uart driver uses specific IOMUX/GPIO matrix settings
+    uart_set_pin(uartNum, RS485_TX_PIN, RS485_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+}
+#endif
 
 static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
@@ -889,6 +923,11 @@ static void sendResponse() {
                txSeqNum, len, totalBytes, hexBuf, ascBuf);
 #endif
 
+#if RS485_DE_PIN < 0
+    // For auto-direction transceiver: Wake it up before sending real data
+    wakeupAutoDirectionTransceiver();
+#endif
+
     // TX immediately - matches OLD working version (no turnaround delay)
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
@@ -913,6 +952,11 @@ static void sendResponse() {
  */
 static void sendZeroLengthResponse() {
     uint8_t response = 0;
+
+#if RS485_DE_PIN < 0
+    // For auto-direction transceiver: Wake it up before sending real data
+    wakeupAutoDirectionTransceiver();
+#endif
 
     // TX immediately - matches OLD working version
     uart_write_bytes(uartNum, (const char*)&response, 1);
