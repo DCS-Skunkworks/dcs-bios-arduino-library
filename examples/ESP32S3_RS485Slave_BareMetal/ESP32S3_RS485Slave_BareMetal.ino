@@ -904,9 +904,16 @@ static void sendResponse() {
                txSeqNum, len, totalBytes, hexBuf, ascBuf);
 #endif
 
-    // TX immediately - matches OLD working version (no turnaround delay)
+    // Assert RTS/DE manually first, wait, then TX
+    // This mimics the AVR's tx_delay_byte() which warms up the transceiver
+    uart_set_rts(uartNum, 1);  // Assert RTS (DE) before TX starts
+    delayMicroseconds(50);     // 50µs delay - let transceiver fully switch to TX mode
+
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
+
+    delayMicroseconds(10);     // Small delay after TX before releasing DE
+    uart_set_rts(uartNum, 0);  // Release RTS (DE) after TX complete
 
 #if UDP_DEBUG_ENABLE
     int64_t txEndTime = esp_timer_get_time();
@@ -925,15 +932,22 @@ static void sendResponse() {
 
 /**
  * sendZeroLengthResponse() - Respond with empty packet (no data to send)
+ *
+ * Uses same manual RTS/DE timing as sendResponse() for consistency
  */
 static void sendZeroLengthResponse() {
     uint8_t response = 0;
 
-    // TX immediately - matches OLD working version
+    // Assert RTS/DE manually first, wait, then TX
+    // Same pattern as sendResponse() - let transceiver fully switch to TX mode
+    uart_set_rts(uartNum, 1);  // Assert RTS (DE) before TX starts
+    delayMicroseconds(50);     // 50µs delay
+
     uart_write_bytes(uartNum, (const char*)&response, 1);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
 
-    // NO ECHO HANDLING - auto-direction transceiver suppresses echo
+    delayMicroseconds(10);     // Small delay after TX before releasing DE
+    uart_set_rts(uartNum, 0);  // Release RTS (DE) after TX complete
 
     rs485State = STATE_RX_WAIT_ADDRESS;
 }
