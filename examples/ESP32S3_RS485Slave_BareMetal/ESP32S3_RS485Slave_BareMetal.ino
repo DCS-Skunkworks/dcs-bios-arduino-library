@@ -778,6 +778,21 @@ static void initRS485Hardware() {
     // Enable hardware RS485 mode with automatic DE control
     ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX));
 
+    // =========================================================================
+    // CRITICAL: Add delay between DE assertion and TX start
+    // =========================================================================
+    // The AVR uses tx_delay_byte() which creates ~40µs (1 byte time) delay
+    // between receiving the poll and asserting DE + starting TX.
+    //
+    // The ESP32's hardware RS485 mode needs this delay configured explicitly.
+    // Without it, DE assertion and first TX bit happen simultaneously, which
+    // can cause the transceiver to not be fully switched when data starts.
+    //
+    // Configure RS485 TX delay: delay in bit times after DE before TX starts
+    // At 250kbaud: 1 bit = 4µs, so 10 bits = 40µs (matches AVR tx_delay_byte)
+    UART_LL_GET_HW(uartNum)->rs485_conf.dl1_en = 1;  // Enable TX delay
+    UART_LL_GET_HW(uartNum)->rs485_conf.tx_dly_num = 10;  // 10 bit times delay
+
 #if RS485_DE_INVERT
     // Invert DE polarity if needed (some boards have inverters on DE line)
     ESP_ERROR_CHECK(uart_set_line_inverse(uartNum, UART_SIGNAL_RTS_INV));
