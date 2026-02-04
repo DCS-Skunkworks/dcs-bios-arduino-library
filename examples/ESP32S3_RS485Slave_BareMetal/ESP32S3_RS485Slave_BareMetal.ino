@@ -26,7 +26,7 @@
 // Timing Constants - EXACTLY as old version
 #define SYNC_TIMEOUT_US     500     // 500µs silence = sync detected [ IS THIS NEEDED? Protocol Compliance?]
 #define RX_TIMEOUT_SYMBOLS  12      // How about this one? what value would be optimal? is this for protocol compliance?
-#define RX_FRAME_TIMEOUT_US 5000    // I assume this is for mid frame timeouts?
+#define RX_FRAME_TIMEOUT_US 6000   // I assume this is for mid frame timeouts?
 #define MICROSECOND_DELAY   40      // and I assume this is to allow Rx/Tx switching 
 
 
@@ -840,9 +840,9 @@ public:
 // TEST PINS
 // ============================================================================
 
-#define SWITCH_PIN      -1
+#define SWITCH_PIN      2
 #define BUTTON_PIN      0
-#define MC_READY_PIN    -1
+#define MC_READY_PIN    1
 
 #if SWITCH_PIN >= 0
 Switch2Pos masterArmSw("MASTER_ARM_SW", SWITCH_PIN);
