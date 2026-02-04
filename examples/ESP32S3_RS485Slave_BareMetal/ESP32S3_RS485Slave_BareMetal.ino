@@ -1,9 +1,9 @@
 /**
- * ESP32-S3 RS485 SLAVE - MANUAL DE CONTROL
+ * ESP32-S3 RS485 SLAVE - HARDWARE RS485 MODE
  *
  * Key changes:
- * 1. Uses manual DE control (GPIO) instead of UART_MODE_RS485_HALF_DUPLEX
- * 2. Matches ESP32 Master approach for consistent timing
+ * 1. Uses UART_MODE_RS485_HALF_DUPLEX for hardware-controlled DE timing
+ * 2. DE pin is controlled by UART hardware, not GPIO - more precise timing
  * 3. Protocol: Length byte = DATA bytes only (not including msgtype)
  */
 
@@ -512,35 +512,14 @@ static volatile int64_t lastRxTime = 0;
 static uart_port_t uartNum = (uart_port_t)RS485_UART_NUM;
 
 // ============================================================================
-// MANUAL DE CONTROL - Like the ESP32 Master for precise timing
+// HARDWARE RS485 MODE - UART controls DE timing automatically
 // ============================================================================
-
-static gpio_num_t dePin = (gpio_num_t)RS485_DE_PIN;
-
-static void setDE(bool high) {
-    gpio_set_level(dePin, high ? 1 : 0);
-}
 
 static void initRS485Hardware() {
     // =========================================================================
-    // GPIO: Manual DE pin control (NOT using UART's auto RS485 mode!)
-    // This matches the ESP32 Master approach for consistent timing
-    // =========================================================================
-#if RS485_DE_PIN >= 0
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << dePin),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
-    gpio_config(&io_conf);
-    setDE(false);  // Start in RX mode
-#endif
-
-    // =========================================================================
-    // UART: Normal mode (NOT RS485 auto mode!)
-    // We handle DE manually for precise timing control
+    // UART Configuration with Hardware RS485 mode
+    // The UART peripheral will control the DE pin automatically with precise
+    // hardware timing - no software delays or GPIO manipulation needed
     // =========================================================================
     uart_config_t uart_config = {
         .baud_rate = RS485_BAUD_RATE,
@@ -549,41 +528,46 @@ static void initRS485Hardware() {
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .rx_flow_ctrl_thresh = 0,
-        .source_clk = UART_CLOCK_SOURCE  // Configurable clock source
+        .source_clk = UART_CLOCK_SOURCE
     };
 
     ESP_ERROR_CHECK(uart_driver_install(uartNum, UART_RX_BUFFER_SIZE,
                                          UART_TX_BUFFER_SIZE, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(uartNum, &uart_config));
 
-    // Set pins WITHOUT RTS pin - we control DE manually
+    // Set pins WITH RTS pin for hardware DE control
+    // In RS485 mode, RTS pin is used as DE (Driver Enable)
     ESP_ERROR_CHECK(uart_set_pin(uartNum,
                                   RS485_TX_PIN,
                                   RS485_RX_PIN,
-                                  UART_PIN_NO_CHANGE,
+                                  RS485_DE_PIN,    // RTS = DE pin
                                   UART_PIN_NO_CHANGE));
 
-    // Use normal UART mode, NOT RS485 auto mode
-    ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_UART));
+    // Use hardware RS485 half-duplex mode
+    // This mode automatically:
+    // - Asserts DE before TX starts
+    // - Deasserts DE after TX completes
+    // - Handles timing at hardware level (more precise than software)
+    ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX));
 
     ESP_ERROR_CHECK(uart_set_rx_timeout(uartNum, RX_TIMEOUT_SYMBOLS));
     uart_flush_input(uartNum);
 
     rs485State = STATE_SYNC;
     lastRxTime = esp_timer_get_time();
+
+    udpDbgSend("RS485 HW mode enabled, DE pin=%d", RS485_DE_PIN);
 }
 
 // ============================================================================
-// TX HANDLING - PIPELINED BULK TRANSMISSION (like AVR UDRE-driven approach)
+// TX HANDLING - HARDWARE RS485 MODE
 // ============================================================================
 //
-// Key insight from AVR analysis:
-// - AVR UDRE (Data Register Empty) fires when buffer CAN accept data, BEFORE
-//   the current byte finishes transmitting. This pipelines bytes back-to-back.
-// - Our previous byte-by-byte approach waited for TX_IDLE after EACH byte,
-//   creating gaps between bytes on the bus.
-// - The fix: Write all bytes to FIFO at once (they pipeline automatically),
-//   then wait for TX_IDLE only at the END.
+// With UART_MODE_RS485_HALF_DUPLEX, the hardware automatically:
+// - Asserts DE when we write to TX FIFO
+// - Keeps DE high during transmission
+// - Deasserts DE after last stop bit
+// No manual GPIO control needed!
 // ============================================================================
 
 // Spinlock for critical sections - prevents WiFi/radio ISRs from corrupting TX timing
@@ -591,10 +575,6 @@ static portMUX_TYPE txMutex = portMUX_INITIALIZER_UNLOCKED;
 
 // Get the hardware UART device pointer for direct register access
 static uart_dev_t* const uartHw = &UART1;
-
-// DE settle delay after enabling transceiver (microseconds)
-// MAX13488E needs ~30ns, but GPIO + bus settling may need more
-static constexpr uint32_t DE_SETTLE_US = DELAY_MICRO;
 
 static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
@@ -612,29 +592,19 @@ static void sendResponse() {
     size_t totalBytes = 3 + len;
 
     // =========================================================================
-    // CRITICAL SECTION with pipelined bulk transmission
-    // Write all bytes to FIFO at once - they transmit back-to-back automatically
-    // Only wait for TX_IDLE at the END (not after each byte!)
+    // CRITICAL SECTION - Hardware RS485 mode handles DE automatically
+    // We just need to write to FIFO and wait for completion
     // =========================================================================
     portENTER_CRITICAL(&txMutex);
 
-#if RS485_DE_PIN >= 0
-    setDE(true);
-    delayMicroseconds(DE_SETTLE_US);  // Let transceiver settle
-#endif
-
-    // Write all bytes to FIFO in one shot - ESP32 FIFO is 128 bytes,
-    // our packets are small (<64 bytes), so they all fit and pipeline
+    // Write all bytes to FIFO - hardware will assert DE automatically
     uart_ll_write_txfifo(uartHw, packet, totalBytes);
 
     // Wait for ALL bytes to complete transmission
+    // Hardware will deassert DE after last stop bit
     while (!uart_ll_is_tx_idle(uartHw)) {
         // Spin
     }
-
-#if RS485_DE_PIN >= 0
-    setDE(false);  // Return to RX mode
-#endif
 
     // Flush any RX echo from our own transmission
     uart_ll_rxfifo_rst(uartHw);
@@ -663,22 +633,13 @@ static void sendZeroLengthResponse() {
 
     portENTER_CRITICAL(&txMutex);
 
-#if RS485_DE_PIN >= 0
-    setDE(true);
-    delayMicroseconds(DE_SETTLE_US);  // Let transceiver settle
-#endif
-
-    // Write zero-length response (single byte)
+    // Write zero-length response - hardware handles DE
     uart_ll_write_txfifo(uartHw, &zero, 1);
 
     // Wait for byte to complete
     while (!uart_ll_is_tx_idle(uartHw)) {
         // Spin
     }
-
-#if RS485_DE_PIN >= 0
-    setDE(false);
-#endif
 
     // Flush any RX echo
     uart_ll_rxfifo_rst(uartHw);
