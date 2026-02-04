@@ -23,8 +23,10 @@
 
 // Timing Constants - EXACTLY as old version
 #define SYNC_TIMEOUT_US     500     // 500µs silence = sync detected
-#define RX_TIMEOUT_SYMBOLS  12      // ~480µs at 250kbaud
-#define RX_FRAME_TIMEOUT_US 5000    // 5ms timeout (OLD value, not 500ms!)
+#define RX_TIMEOUT_SYMBOLS  1   
+#define RX_FRAME_TIMEOUT_US 5000   
+#define MICROSECOND_DELAY   1      
+
 
 // ============================================================================
 // UDP DEBUG
@@ -556,7 +558,7 @@ static void sendResponse() {
 
     // Small delay before TX to let transceiver fully switch
     // The AVR's tx_delay_byte() creates ~40µs delay - let's try similar
-    delayMicroseconds(40);
+    delayMicroseconds(MICROSECOND_DELAY);
 
     // Simple TX - hardware handles DE
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
@@ -571,7 +573,7 @@ static void sendResponse() {
 
 static void sendZeroLengthResponse() {
     uint8_t response = 0;
-    delayMicroseconds(40);  // Same delay as sendResponse
+    delayMicroseconds(MICROSECOND_DELAY);  // Same delay as sendResponse
     uart_write_bytes(uartNum, (const char*)&response, 1);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
     rs485State = STATE_RX_WAIT_ADDRESS;
@@ -752,7 +754,7 @@ public:
 
 #define SWITCH_PIN      -1
 #define BUTTON_PIN      0
-#define MC_READY_PIN    15
+#define MC_READY_PIN    -1
 
 #if SWITCH_PIN >= 0
 Switch2Pos masterArmSw("MASTER_ARM_SW", SWITCH_PIN);
