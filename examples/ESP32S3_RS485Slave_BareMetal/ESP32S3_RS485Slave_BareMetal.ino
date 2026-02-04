@@ -41,8 +41,6 @@
 #define FRAME_TIMEOUT_US      0     // Reset if stuck mid-frame (0 = disabled)
 #define POST_TX_DELAY_US      0     // Any delay here causes the slave to send blanks.. why?
 
-#define MICRODELAY  0
-
 // ============================================================================
 // DEBUG OPTIONS
 // ============================================================================
@@ -574,7 +572,16 @@ static void initRS485Hardware() {
 }
 
 // ============================================================================
-// TX HANDLING - BYTE-BY-BYTE TRANSMISSION (like AVR ISR-driven approach)
+// TX HANDLING - PIPELINED BULK TRANSMISSION (like AVR UDRE-driven approach)
+// ============================================================================
+//
+// Key insight from AVR analysis:
+// - AVR UDRE (Data Register Empty) fires when buffer CAN accept data, BEFORE
+//   the current byte finishes transmitting. This pipelines bytes back-to-back.
+// - Our previous byte-by-byte approach waited for TX_IDLE after EACH byte,
+//   creating gaps between bytes on the bus.
+// - The fix: Write all bytes to FIFO at once (they pipeline automatically),
+//   then wait for TX_IDLE only at the END.
 // ============================================================================
 
 // Spinlock for critical sections - prevents WiFi/radio ISRs from corrupting TX timing
@@ -583,16 +590,9 @@ static portMUX_TYPE txMutex = portMUX_INITIALIZER_UNLOCKED;
 // Get the hardware UART device pointer for direct register access
 static uart_dev_t* const uartHw = &UART1;
 
-// Write ONE byte and wait for it to be transmitted before returning
-// This mimics AVR's ISR-driven byte-by-byte transmission with natural gaps
-static inline void txByte(uint8_t c) {
-    // Write byte to FIFO
-    uart_ll_write_txfifo(uartHw, &c, 1);
-    // Wait for this byte to be fully transmitted (shift register empty)
-    while (!uart_ll_is_tx_idle(uartHw)) {
-        // Spin
-    }
-}
+// DE settle delay after enabling transceiver (microseconds)
+// MAX13488E needs ~30ns, but GPIO + bus settling may need more
+static constexpr uint32_t DE_SETTLE_US = 2;
 
 static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
@@ -610,25 +610,32 @@ static void sendResponse() {
     size_t totalBytes = 3 + len;
 
     // =========================================================================
-    // CRITICAL SECTION with byte-by-byte transmission (like AVR ISR approach)
+    // CRITICAL SECTION with pipelined bulk transmission
+    // Write all bytes to FIFO at once - they transmit back-to-back automatically
+    // Only wait for TX_IDLE at the END (not after each byte!)
     // =========================================================================
     portENTER_CRITICAL(&txMutex);
 
 #if RS485_DE_PIN >= 0
     setDE(true);
-    // Small delay to let transceiver fully enable before first bit
-    // The MAX13488E needs ~30ns, but GPIO + bus settling might need more
-    delayMicroseconds(MICRODELAY);
+    delayMicroseconds(DE_SETTLE_US);  // Let transceiver settle
 #endif
 
-    // Transmit byte-by-byte, waiting for each to complete (like AVR ISR)
-    for (size_t i = 0; i < totalBytes; i++) {
-        txByte(packet[i]);
+    // Write all bytes to FIFO in one shot - ESP32 FIFO is 128 bytes,
+    // our packets are small (<64 bytes), so they all fit and pipeline
+    uart_ll_write_txfifo(uartHw, packet, totalBytes);
+
+    // Wait for ALL bytes to complete transmission
+    while (!uart_ll_is_tx_idle(uartHw)) {
+        // Spin
     }
 
 #if RS485_DE_PIN >= 0
     setDE(false);  // Return to RX mode
 #endif
+
+    // Flush any RX echo from our own transmission
+    uart_ll_rxfifo_rst(uartHw);
 
     portEXIT_CRITICAL(&txMutex);
 
@@ -650,18 +657,29 @@ static void sendResponse() {
 }
 
 static void sendZeroLengthResponse() {
+    uint8_t zero = 0;
+
     portENTER_CRITICAL(&txMutex);
 
 #if RS485_DE_PIN >= 0
     setDE(true);
-    delayMicroseconds(MICRODELAY);  // Let transceiver enable
+    delayMicroseconds(DE_SETTLE_US);  // Let transceiver settle
 #endif
 
-    txByte(0);  // Zero-length response
+    // Write zero-length response (single byte)
+    uart_ll_write_txfifo(uartHw, &zero, 1);
+
+    // Wait for byte to complete
+    while (!uart_ll_is_tx_idle(uartHw)) {
+        // Spin
+    }
 
 #if RS485_DE_PIN >= 0
     setDE(false);
 #endif
+
+    // Flush any RX echo
+    uart_ll_rxfifo_rst(uartHw);
 
     portEXIT_CRITICAL(&txMutex);
 
