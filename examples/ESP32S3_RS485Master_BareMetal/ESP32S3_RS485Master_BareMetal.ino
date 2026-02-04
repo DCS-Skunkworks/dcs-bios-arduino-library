@@ -546,11 +546,14 @@ public:
                         uart_read_bytes(uartNum, &c, 1, 0);
                         rxtxLen = c;
                         slavePresent[currentPollAddress] = true;
-                        // Only log when slave has actual data to send
-                        if (rxtxLen > 0) {
+                        // Only log valid-looking responses (len <= 64)
+                        if (rxtxLen > 0 && rxtxLen <= 64) {
                             UDP_DBG("RX_START addr=%d len=%d", currentPollAddress, rxtxLen);
                             state = STATE_RX_WAIT_MSGTYPE;
                             rxStartTime = now;
+                        } else if (rxtxLen > 64) {
+                            // Garbage length - don't spam, just go back to idle
+                            state = STATE_IDLE;
                         } else {
                             state = STATE_IDLE;
                         }
@@ -560,12 +563,8 @@ public:
 
             case STATE_RX_WAIT_MSGTYPE:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
-                    UDP_DBG("RX_ERR addr=%d timeout waiting for msgtype", currentPollAddress);
-                    // Send visible error marker instead of blank line
-                    const char* err1 = "[ERR:MSGTYPE]\n";
+                    // Timeout - don't spam debug
                     messageBuffer.clear();
-                    while (*err1) messageBuffer.put(*err1++);
-                    messageBuffer.complete = true;
                     state = STATE_IDLE;
                     return;
                 }
@@ -583,12 +582,8 @@ public:
 
             case STATE_RX_WAIT_DATA:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
-                    UDP_DBG("RX_ERR addr=%d timeout waiting for data, remaining=%d", currentPollAddress, rxtxLen);
-                    // Send visible error marker instead of blank line
-                    const char* err2 = "[ERR:DATA]\n";
+                    // Timeout - don't spam debug
                     messageBuffer.clear();
-                    while (*err2) messageBuffer.put(*err2++);
-                    messageBuffer.complete = true;
                     state = STATE_IDLE;
                     return;
                 }
@@ -610,12 +605,8 @@ public:
 
             case STATE_RX_WAIT_CHECKSUM:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
-                    UDP_DBG("RX_ERR addr=%d timeout waiting for checksum", currentPollAddress);
-                    // Send visible error marker instead of blank line
-                    const char* err3 = "[ERR:CHECKSUM]\n";
+                    // Timeout - don't spam debug
                     messageBuffer.clear();
-                    while (*err3) messageBuffer.put(*err3++);
-                    messageBuffer.complete = true;
                     state = STATE_IDLE;
                     return;
                 }

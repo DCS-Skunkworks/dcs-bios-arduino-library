@@ -911,12 +911,7 @@ static void sendZeroLengthResponse() {
     esp_err_t txResult = uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10));
     deRelease();  // Disable transmitter, enable receiver
 
-    // Check for echo (indicates DE timing issue)
-    size_t echoBytes = 0;
-    uart_get_buffered_data_len(uartNum, &echoBytes);
-    if (echoBytes > 0) {
-        DBGF("[TX0 ECHO! %d bytes - DE issue?]\n", echoBytes);
-    }
+    // Flush any echo bytes (don't spam debug)
     uart_flush_input(uartNum);
 
     // Reset timing reference after TX
@@ -1047,9 +1042,7 @@ static void processRS485() {
                 // Protocol sanity check: data length must be reasonable
                 // (matches AVR buffer overflow protection behavior)
                 if (rxtxLen > MAX_FRAME_DATA_SIZE) {
-                    // Show full frame header for debugging - this is garbage data!
-                    DBGF("[ERR GARBAGE FRAME: addr=0x%02X msgtype=0x%02X len=%d]\n",
-                         rxSlaveAddress, rxMsgType, rxtxLen);
+                    // Garbage data - don't spam debug, just count it
 #if UDP_DEBUG_ENABLE
                     dbgErrCount++;
 #endif
