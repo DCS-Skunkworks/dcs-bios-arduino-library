@@ -1,14 +1,15 @@
 /**
- * ESP32-S3 RS485 SLAVE - BYTE-BY-BYTE TX (AVR-style)
+ * ESP32-S3 RS485 SLAVE - INTERRUPT-DRIVEN (AVR-style)
  *
  * Key design:
- * 1. Manual DE control via GPIO (not hardware RS485 mode)
- * 2. Byte-by-byte TX matching AVR's UDRE interrupt approach
- * 3. Natural inter-byte gaps provide "organic yields" for parallelism
- * 4. Protocol: Length byte = DATA bytes only (not including msgtype)
+ * 1. UART RX interrupt fires immediately when byte arrives
+ * 2. State machine runs IN the ISR - no polling latency
+ * 3. Response sent immediately from ISR when poll detected
+ * 4. This matches AVR's RXC interrupt behavior exactly
  *
- * This approach matches how DCS-BIOS protocol was designed - the byte-by-byte
- * processing allows state machines to work efficiently with natural sync points.
+ * The main loop only handles non-time-critical tasks:
+ * - Input polling (switches, buttons)
+ * - Export data parsing (LED updates)
  */
 
 #define SLAVE_ADDRESS 1
@@ -24,30 +25,21 @@
 
 // ============================================================================
 // CLOCK SOURCE SELECTION
-// Options:
-//   UART_SCLK_DEFAULT - APB clock (~80MHz) - most common
-//   UART_SCLK_XTAL    - Crystal clock (40MHz) - more stable
-//   UART_SCLK_RTC     - RTC clock (8MHz) - low power but less accurate
 // ============================================================================
 #define UART_CLOCK_SOURCE   UART_SCLK_XTAL
 
 // Buffer Sizes
-#define UART_RX_BUFFER_SIZE    512
-#define UART_TX_BUFFER_SIZE    256
 #define MESSAGE_BUFFER_SIZE    64
 
 // ============================================================================
-// TIMING CONFIGURATION - Tweak these to debug corruption issues
+// TIMING CONFIGURATION
 // ============================================================================
 #define SYNC_TIMEOUT_US      500    // 500µs silence = sync detected
-#define RX_TIMEOUT_SYMBOLS   10    // UART RX timeout in bit periods. Was 12, why? check AVR and protocol, whats the optimal value based on protocol and 250000 baud rate?
-#define FRAME_TIMEOUT_US     6000     // Reset if stuck mid-frame (0 = disabled)
 
 // ============================================================================
 // DEBUG OPTIONS
 // ============================================================================
 #define UDP_DEBUG_ENABLE    0
-#define DEBUG_TX_HEX        1       // Log transmitted bytes as hex
 #define WIFI_SSID           "TestNetwork"
 #define WIFI_PASSWORD       "TestingOnly"
 
@@ -55,8 +47,11 @@
 #include <driver/uart.h>
 #include <driver/gpio.h>
 #include <hal/uart_ll.h>
+#include <hal/gpio_ll.h>
 #include <soc/uart_struct.h>
+#include <soc/gpio_struct.h>
 #include <esp_timer.h>
+#include <esp_intr_alloc.h>
 
 #if UDP_DEBUG_ENABLE
 #include <WiFi.h>
@@ -75,7 +70,7 @@ void udpDbgInit() {
 void udpDbgCheck() {
     if (!udpDbgConnected && WiFi.status() == WL_CONNECTED) {
         udpDbgConnected = true;
-        udpDbgSend("=== SLAVE %d ONLINE === IP=%s", SLAVE_ADDRESS, WiFi.localIP().toString().c_str());
+        udpDbgSend("=== SLAVE %d ONLINE (ISR MODE) === IP=%s", SLAVE_ADDRESS, WiFi.localIP().toString().c_str());
     }
 }
 
@@ -100,7 +95,7 @@ void udpDbgSend(const char* fmt, ...) {
 #endif
 
 // ============================================================================
-// DCS-BIOS PROTOCOL PARSER
+// DCS-BIOS PROTOCOL PARSER (for export data - runs in main loop)
 // ============================================================================
 
 #define DCSBIOS_STATE_WAIT_FOR_SYNC  0
@@ -258,13 +253,14 @@ public:
     bool hasUpdatedData() { return userDirty; }
 };
 
+// Parser instance - processes export data queued by ISR
 class ProtocolParser {
 private:
-    volatile uint8_t state;
-    volatile uint16_t address;
-    volatile uint16_t count;
-    volatile uint16_t data;
-    volatile uint8_t sync_byte_count;
+    uint8_t state;
+    uint16_t address;
+    uint16_t count;
+    uint16_t data;
+    uint8_t sync_byte_count;
     ExportStreamListener* startESL;
 
 public:
@@ -349,7 +345,7 @@ public:
 // INPUT POLLING SYSTEM
 // ============================================================================
 
-static bool messageSentOrQueued = false;
+static volatile bool messageSentOrQueued = false;
 
 class PollingInput {
 private:
@@ -414,7 +410,7 @@ public:
 PollingInput* PollingInput::firstPollingInput = nullptr;
 
 // ============================================================================
-// RING BUFFER
+// RING BUFFER (lock-free for ISR/main communication)
 // ============================================================================
 
 template<unsigned int SIZE>
@@ -429,22 +425,30 @@ public:
 
     RingBuffer() : writepos(0), readpos(0), complete(false) {}
 
-    __attribute__((always_inline)) void put(uint8_t c) {
+    // Called from main loop only
+    void put(uint8_t c) {
         buffer[writepos] = c;
         writepos = (writepos + 1) % SIZE;
     }
 
-    __attribute__((always_inline)) uint8_t get() {
+    // Called from ISR - get for transmission
+    uint8_t IRAM_ATTR getISR() {
         uint8_t ret = buffer[readpos];
         readpos = (readpos + 1) % SIZE;
         return ret;
     }
 
-    __attribute__((always_inline)) bool isEmpty() { return readpos == writepos; }
-    __attribute__((always_inline)) bool isNotEmpty() { return readpos != writepos; }
-    __attribute__((always_inline)) uint8_t getLength() { return (writepos - readpos) % SIZE; }
-    __attribute__((always_inline)) void clear() { readpos = 0; writepos = 0; }
-    __attribute__((always_inline)) uint8_t availableForWrite() { return SIZE - getLength() - 1; }
+    uint8_t IRAM_ATTR getLengthISR() { return (writepos - readpos) % SIZE; }
+    bool IRAM_ATTR isCompleteISR() { return complete; }
+
+    void IRAM_ATTR clearISR() {
+        readpos = 0;
+        writepos = 0;
+        complete = false;
+    }
+
+    bool isEmpty() { return readpos == writepos; }
+    void clear() { readpos = 0; writepos = 0; }
 };
 
 // ============================================================================
@@ -453,6 +457,12 @@ public:
 
 static ProtocolParser parser;
 static RingBuffer<MESSAGE_BUFFER_SIZE> messageBuffer;
+
+// Export data buffer - ISR queues bytes here, main loop processes
+#define EXPORT_BUFFER_SIZE 256
+static volatile uint8_t exportBuffer[EXPORT_BUFFER_SIZE];
+static volatile uint8_t exportWritePos = 0;
+static volatile uint8_t exportReadPos = 0;
 
 bool tryToSendDcsBiosMessage(const char* msg, const char* arg) {
     if (messageBuffer.complete) return false;
@@ -475,12 +485,11 @@ bool tryToSendDcsBiosMessage(const char* msg, const char* arg) {
     messageBuffer.complete = true;
     PollingInput::setMessageSentOrQueued();
 
-    udpDbgSend("Q: %s %s", msg, arg);
     return true;
 }
 
 // ============================================================================
-// RS485 SLAVE STATE MACHINE
+// RS485 STATE MACHINE - RUNS IN ISR!
 // ============================================================================
 
 enum RS485State {
@@ -493,8 +502,7 @@ enum RS485State {
     STATE_RX_WAIT_ANSWER_DATALENGTH,
     STATE_RX_WAIT_ANSWER_MSGTYPE,
     STATE_RX_WAIT_ANSWER_DATA,
-    STATE_RX_WAIT_ANSWER_CHECKSUM,
-    STATE_TX_SENDING
+    STATE_RX_WAIT_ANSWER_CHECKSUM
 };
 
 enum RxDataType {
@@ -502,6 +510,7 @@ enum RxDataType {
     RXDATA_DCSBIOS_EXPORT
 };
 
+// All volatile for ISR access
 static volatile RS485State rs485State = STATE_SYNC;
 static volatile uint8_t rxSlaveAddress = 0;
 static volatile uint8_t rxMsgType = 0;
@@ -509,228 +518,114 @@ static volatile uint8_t rxtxLen = 0;
 static volatile RxDataType rxDataType = RXDATA_IGNORE;
 static volatile int64_t lastRxTime = 0;
 
-static uart_port_t uartNum = (uart_port_t)RS485_UART_NUM;
-
-// ============================================================================
-// MANUAL DE CONTROL + BYTE-BY-BYTE TX (AVR-style)
-// ============================================================================
-//
-// DCS-BIOS protocol is designed around byte-by-byte processing.
-// The natural inter-byte gaps provide synchronization and allow parallelism.
-// This matches the AVR's UDRE interrupt-driven approach.
-// ============================================================================
-
-static gpio_num_t dePin = (gpio_num_t)RS485_DE_PIN;
-
-static inline void setDE(bool high) {
-    gpio_set_level(dePin, high ? 1 : 0);
-}
-
-static void initRS485Hardware() {
-    // =========================================================================
-    // GPIO: Manual DE pin control
-    // =========================================================================
-#if RS485_DE_PIN >= 0
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << dePin),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
-    gpio_config(&io_conf);
-    setDE(false);  // Start in RX mode
-#endif
-
-    // =========================================================================
-    // UART: Normal mode with manual DE control
-    // =========================================================================
-    uart_config_t uart_config = {
-        .baud_rate = RS485_BAUD_RATE,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .rx_flow_ctrl_thresh = 0,
-        .source_clk = UART_CLOCK_SOURCE
-    };
-
-    ESP_ERROR_CHECK(uart_driver_install(uartNum, UART_RX_BUFFER_SIZE,
-                                         UART_TX_BUFFER_SIZE, 0, NULL, 0));
-    ESP_ERROR_CHECK(uart_param_config(uartNum, &uart_config));
-
-    // Set pins WITHOUT RTS - we control DE manually
-    ESP_ERROR_CHECK(uart_set_pin(uartNum,
-                                  RS485_TX_PIN,
-                                  RS485_RX_PIN,
-                                  UART_PIN_NO_CHANGE,
-                                  UART_PIN_NO_CHANGE));
-
-    // Normal UART mode (not RS485 auto mode)
-    ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_UART));
-
-    ESP_ERROR_CHECK(uart_set_rx_timeout(uartNum, RX_TIMEOUT_SYMBOLS));
-    uart_flush_input(uartNum);
-
-    rs485State = STATE_SYNC;
-    lastRxTime = esp_timer_get_time();
-
-    udpDbgSend("RS485 manual DE mode, pin=%d", RS485_DE_PIN);
-}
-
-// ============================================================================
-// TX HANDLING - BYTE-BY-BYTE (AVR-style)
-// ============================================================================
-//
-// DCS-BIOS protocol is designed for byte-by-byte processing.
-// Like AVR's UDRE interrupt approach:
-// 1. Assert DE (enable driver)
-// 2. Send one byte, wait for TX complete
-// 3. Repeat for all bytes
-// 4. Deassert DE (back to receive mode)
-//
-// The natural inter-byte gaps provide "organic yields" for parallelism.
-// ============================================================================
-
-// Spinlock for critical sections
-static portMUX_TYPE txMutex = portMUX_INITIALIZER_UNLOCKED;
-
-// Direct hardware access for precise timing
+// Direct hardware pointers for ISR
 static uart_dev_t* const uartHw = &UART1;
+static intr_handle_t uartIntrHandle;
 
-// Send ONE byte and wait for it to complete (like AVR TXC)
-static inline void txByte(uint8_t c) {
-    uart_ll_write_txfifo(uartHw, &c, 1);
-    while (!uart_ll_is_tx_idle(uartHw)) {
-        // Spin until byte is fully transmitted
+// ============================================================================
+// DIRECT GPIO CONTROL (faster than gpio_set_level in ISR)
+// ============================================================================
+
+#if RS485_DE_PIN >= 0
+static inline void IRAM_ATTR setDE_ISR(bool high) {
+    if (high) {
+        GPIO.out_w1ts = (1ULL << RS485_DE_PIN);
+    } else {
+        GPIO.out_w1tc = (1ULL << RS485_DE_PIN);
     }
 }
-
-static void sendResponse() {
-    uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
-    uint8_t len = messageBuffer.getLength();
-
-    packet[0] = len;      // Length = DATA bytes only (NOT including msgtype!)
-    packet[1] = 0;        // Message type = 0
-
-    for (uint8_t i = 0; i < len; i++) {
-        packet[2 + i] = messageBuffer.get();
-    }
-
-    packet[2 + len] = 0x72;  // Checksum
-
-    size_t totalBytes = 3 + len;
-
-    // =========================================================================
-    // CRITICAL SECTION - Byte-by-byte TX like AVR
-    // DE stays HIGH throughout, bytes sent one at a time
-    // =========================================================================
-    portENTER_CRITICAL(&txMutex);
-
-#if RS485_DE_PIN >= 0
-    setDE(true);  // Enable driver
-#endif
-
-    // Send bytes one-by-one, waiting for each to complete
-    // This matches AVR's interrupt-driven byte-by-byte approach
-    for (size_t i = 0; i < totalBytes; i++) {
-        txByte(packet[i]);
-    }
-
-#if RS485_DE_PIN >= 0
-    setDE(false);  // Back to receive mode
-#endif
-
-    // Flush any RX echo
-    uart_ll_rxfifo_rst(uartHw);
-
-    portEXIT_CRITICAL(&txMutex);
-
-    messageBuffer.clear();
-    messageBuffer.complete = false;
-    rs485State = STATE_RX_WAIT_ADDRESS;
-
-    // Debug logging
-#if DEBUG_TX_HEX
-    static char hexBuf[128];
-    int pos = snprintf(hexBuf, sizeof(hexBuf), "TX[%d]: ", (int)totalBytes);
-    for (size_t i = 0; i < totalBytes && pos < 120; i++) {
-        pos += snprintf(hexBuf + pos, sizeof(hexBuf) - pos, "%02X ", packet[i]);
-    }
-    udpDbgSend("%s", hexBuf);
 #else
-    udpDbgSend("TX len=%d", len);
-#endif
-}
-
-static void sendZeroLengthResponse() {
-    portENTER_CRITICAL(&txMutex);
-
-#if RS485_DE_PIN >= 0
-    setDE(true);
+#define setDE_ISR(x)
 #endif
 
-    txByte(0);  // Zero-length response
+// ============================================================================
+// TX FROM ISR - Send response immediately!
+// ============================================================================
 
-#if RS485_DE_PIN >= 0
-    setDE(false);
-#endif
+static void IRAM_ATTR sendResponseISR() {
+    uint8_t len = messageBuffer.getLengthISR();
 
+    // Enable driver
+    setDE_ISR(true);
+
+    // Send length byte
+    uart_ll_write_txfifo(uartHw, (const uint8_t*)&len, 1);
+    while (!uart_ll_is_tx_idle(uartHw));
+
+    // Send msgtype (0)
+    uint8_t zero = 0;
+    uart_ll_write_txfifo(uartHw, &zero, 1);
+    while (!uart_ll_is_tx_idle(uartHw));
+
+    // Send data bytes
+    for (uint8_t i = 0; i < len; i++) {
+        uint8_t b = messageBuffer.getISR();
+        uart_ll_write_txfifo(uartHw, &b, 1);
+        while (!uart_ll_is_tx_idle(uartHw));
+    }
+
+    // Send checksum
+    uint8_t checksum = 0x72;
+    uart_ll_write_txfifo(uartHw, &checksum, 1);
+    while (!uart_ll_is_tx_idle(uartHw));
+
+    // Disable driver
+    setDE_ISR(false);
+
+    // Flush RX (echo)
     uart_ll_rxfifo_rst(uartHw);
 
-    portEXIT_CRITICAL(&txMutex);
+    // Clear message buffer
+    messageBuffer.clearISR();
+
+    rs485State = STATE_RX_WAIT_ADDRESS;
+}
+
+static void IRAM_ATTR sendZeroLengthResponseISR() {
+    // Enable driver
+    setDE_ISR(true);
+
+    // Send zero length
+    uint8_t zero = 0;
+    uart_ll_write_txfifo(uartHw, &zero, 1);
+    while (!uart_ll_is_tx_idle(uartHw));
+
+    // Disable driver
+    setDE_ISR(false);
+
+    // Flush RX (echo)
+    uart_ll_rxfifo_rst(uartHw);
 
     rs485State = STATE_RX_WAIT_ADDRESS;
 }
 
 // ============================================================================
-// MAIN PROCESSING LOOP - EXACTLY AS OLD VERSION
+// UART RX ISR - This is where the magic happens!
+// Fires immediately when byte arrives, processes state machine, responds instantly
 // ============================================================================
 
-static void processRS485() {
-    int64_t now = esp_timer_get_time();
+static void IRAM_ATTR uart_isr_handler(void *arg) {
+    uint32_t uart_intr_status = uart_ll_get_intsts_mask(uartHw);
 
-    // =========================================================================
-    // FRAME TIMEOUT - Reset if stuck mid-frame too long
-    // Note: AVR doesn't have this, but ESP32 needs it to recover from noise
-    // Set FRAME_TIMEOUT_US to 0 to disable (like AVR)
-    // =========================================================================
-#if FRAME_TIMEOUT_US > 0
-    if (rs485State != STATE_SYNC && rs485State != STATE_RX_WAIT_ADDRESS) {
-        if ((now - lastRxTime) >= FRAME_TIMEOUT_US) {
-            rs485State = STATE_SYNC;
-        }
-    }
-#endif
-
-    // Sync detection - 500µs silence means ready for new frame (like AVR)
-    if (rs485State == STATE_SYNC && (now - lastRxTime) >= SYNC_TIMEOUT_US) {
-        rs485State = STATE_RX_WAIT_ADDRESS;
-    }
-
-    // Process all available RX bytes - NO unnecessary function calls!
-    size_t available = 0;
-    uart_get_buffered_data_len(uartNum, &available);
-
-    while (available > 0) {
+    // Process all available bytes
+    while (uart_ll_get_rxfifo_len(uartHw) > 0) {
         uint8_t c;
-        if (uart_read_bytes(uartNum, &c, 1, 0) != 1) break;
-        available--;
+        uart_ll_read_rxfifo(uartHw, &c, 1);
 
-        // Capture current time for this byte
-        int64_t rxTime = esp_timer_get_time();
+        int64_t now = esp_timer_get_time();
+
+        // Sync detection - if gap > 500µs, reset to wait for address
+        if (rs485State == STATE_SYNC) {
+            if ((now - lastRxTime) >= SYNC_TIMEOUT_US) {
+                rs485State = STATE_RX_WAIT_ADDRESS;
+                // Fall through to process this byte as address
+            } else {
+                lastRxTime = now;
+                continue;  // Stay in sync, discard byte
+            }
+        }
 
         switch (rs485State) {
-            case STATE_SYNC:
-                // AVR behavior: if 500µs passed since last byte, this is start of new frame
-                if ((rxTime - lastRxTime) < SYNC_TIMEOUT_US) {
-                    lastRxTime = rxTime;  // Update and stay in sync
-                    break;
-                }
-                // 500µs passed - transition and FALL THROUGH to process as address!
-                rs485State = STATE_RX_WAIT_ADDRESS;
-                // FALL THROUGH!
-
             case STATE_RX_WAIT_ADDRESS:
                 rxSlaveAddress = c;
                 rs485State = STATE_RX_WAIT_MSGTYPE;
@@ -745,23 +640,46 @@ static void processRS485() {
                 rxtxLen = c;
 
                 if (rxtxLen == 0) {
-                    goto handle_message_complete;
-                }
-
-                if (rxSlaveAddress == 0 && rxMsgType == 0) {
-                    rxDataType = RXDATA_DCSBIOS_EXPORT;
+                    // Message complete - handle it
+                    if (rxSlaveAddress == 0) {
+                        // Broadcast - ignore
+                        rs485State = STATE_RX_WAIT_ADDRESS;
+                    } else if (rxSlaveAddress == SLAVE_ADDRESS) {
+                        // Poll for us! Respond IMMEDIATELY!
+                        if (rxMsgType == 0) {
+                            if (messageBuffer.isCompleteISR()) {
+                                sendResponseISR();
+                            } else {
+                                sendZeroLengthResponseISR();
+                            }
+                        } else {
+                            rs485State = STATE_SYNC;
+                        }
+                    } else {
+                        // Poll for another slave - wait for their response
+                        rs485State = STATE_RX_WAIT_ANSWER_DATALENGTH;
+                    }
                 } else {
-                    rxDataType = RXDATA_IGNORE;
+                    // Has data - determine type
+                    if (rxSlaveAddress == 0 && rxMsgType == 0) {
+                        rxDataType = RXDATA_DCSBIOS_EXPORT;
+                    } else {
+                        rxDataType = RXDATA_IGNORE;
+                    }
+                    rs485State = STATE_RX_WAIT_DATA;
                 }
-
-                rs485State = STATE_RX_WAIT_DATA;
                 break;
 
             case STATE_RX_WAIT_DATA:
                 rxtxLen--;
 
+                // Queue export data for main loop processing
                 if (rxDataType == RXDATA_DCSBIOS_EXPORT) {
-                    parser.processChar(c);
+                    uint8_t nextPos = (exportWritePos + 1) % EXPORT_BUFFER_SIZE;
+                    if (nextPos != exportReadPos) {  // Not full
+                        exportBuffer[exportWritePos] = c;
+                        exportWritePos = nextPos;
+                    }
                 }
 
                 if (rxtxLen == 0) {
@@ -770,7 +688,24 @@ static void processRS485() {
                 break;
 
             case STATE_RX_WAIT_CHECKSUM:
-                goto handle_message_complete;
+                // Message complete
+                if (rxSlaveAddress == 0) {
+                    rs485State = STATE_RX_WAIT_ADDRESS;
+                } else if (rxSlaveAddress == SLAVE_ADDRESS) {
+                    // This was addressed to us with data - respond
+                    if (rxMsgType == 0) {
+                        if (messageBuffer.isCompleteISR()) {
+                            sendResponseISR();
+                        } else {
+                            sendZeroLengthResponseISR();
+                        }
+                    } else {
+                        rs485State = STATE_SYNC;
+                    }
+                } else {
+                    rs485State = STATE_RX_WAIT_ANSWER_DATALENGTH;
+                }
+                break;
 
             case STATE_RX_WAIT_ANSWER_DATALENGTH:
                 rxtxLen = c;
@@ -797,32 +732,91 @@ static void processRS485() {
                 break;
 
             default:
+                rs485State = STATE_SYNC;
                 break;
         }
 
-        // Update lastRxTime for frame timeout tracking (except SYNC which handles it)
-        if (rs485State != STATE_SYNC) {
-            lastRxTime = rxTime;
-        }
+        lastRxTime = now;
+    }
 
-        continue;
+    // Clear interrupt status
+    uart_ll_clr_intsts_mask(uartHw, uart_intr_status);
+}
 
-    handle_message_complete:
-        if (rxSlaveAddress == 0) {
-            rs485State = STATE_RX_WAIT_ADDRESS;
-        } else if (rxSlaveAddress == SLAVE_ADDRESS) {
-            if (rxMsgType == 0 && rxtxLen == 0) {
-                if (!messageBuffer.complete) {
-                    sendZeroLengthResponse();
-                } else {
-                    sendResponse();
-                }
-            } else {
-                rs485State = STATE_SYNC;
-            }
-        } else {
-            rs485State = STATE_RX_WAIT_ANSWER_DATALENGTH;
-        }
+// ============================================================================
+// HARDWARE INITIALIZATION
+// ============================================================================
+
+static void initRS485Hardware() {
+    // =========================================================================
+    // GPIO: DE pin for RS485 direction control
+    // =========================================================================
+#if RS485_DE_PIN >= 0
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << RS485_DE_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io_conf);
+    setDE_ISR(false);  // Start in RX mode
+#endif
+
+    // =========================================================================
+    // UART: Configure for 250kbaud, install driver first for pin config
+    // =========================================================================
+    uart_config_t uart_config = {
+        .baud_rate = RS485_BAUD_RATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .rx_flow_ctrl_thresh = 0,
+        .source_clk = UART_CLOCK_SOURCE
+    };
+
+    // Install driver with minimal buffers (we handle RX in ISR)
+    ESP_ERROR_CHECK(uart_driver_install((uart_port_t)RS485_UART_NUM, 256, 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_param_config((uart_port_t)RS485_UART_NUM, &uart_config));
+    ESP_ERROR_CHECK(uart_set_pin((uart_port_t)RS485_UART_NUM,
+                                  RS485_TX_PIN, RS485_RX_PIN,
+                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+
+    // Disable driver's default ISR handling
+    ESP_ERROR_CHECK(uart_disable_rx_intr((uart_port_t)RS485_UART_NUM));
+
+    // =========================================================================
+    // Register our own ISR for immediate response
+    // =========================================================================
+
+    // Configure RX FIFO threshold - trigger on every byte for lowest latency
+    uart_ll_set_rxfifo_full_thr(uartHw, 1);
+
+    // Enable RX FIFO full interrupt
+    uart_ll_ena_intr_mask(uartHw, UART_INTR_RXFIFO_FULL);
+
+    // Allocate and register ISR
+    ESP_ERROR_CHECK(esp_intr_alloc(ETS_UART1_INTR_SOURCE,
+                                    ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL3,
+                                    uart_isr_handler, NULL, &uartIntrHandle));
+
+    rs485State = STATE_SYNC;
+    lastRxTime = esp_timer_get_time();
+
+    udpDbgSend("RS485 ISR mode initialized, DE pin=%d", RS485_DE_PIN);
+}
+
+// ============================================================================
+// PROCESS EXPORT DATA (called from main loop)
+// ============================================================================
+
+static void processExportData() {
+    // Process bytes queued by ISR
+    while (exportReadPos != exportWritePos) {
+        uint8_t c = exportBuffer[exportReadPos];
+        exportReadPos = (exportReadPos + 1) % EXPORT_BUFFER_SIZE;
+        parser.processChar(c);
     }
 }
 
@@ -905,7 +899,13 @@ void setup() {
 
 void loop() {
     udpDbgCheck();
-    processRS485();
+
+    // Process export data queued by ISR (for LED updates etc)
+    processExportData();
+
+    // Poll inputs (switches, buttons)
     PollingInput::pollInputs();
+
+    // Update outputs (LEDs)
     ExportStreamListener::loopAll();
 }
