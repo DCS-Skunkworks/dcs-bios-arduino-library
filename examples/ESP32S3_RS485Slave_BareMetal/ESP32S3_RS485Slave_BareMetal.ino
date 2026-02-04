@@ -790,8 +790,16 @@ static void initRS485Hardware() {
     //
     // Configure RS485 TX delay: delay in bit times after DE before TX starts
     // At 250kbaud: 1 bit = 4µs, so 10 bits = 40µs (matches AVR tx_delay_byte)
-    UART_LL_GET_HW(uartNum)->rs485_conf.dl1_en = 1;  // Enable TX delay
-    UART_LL_GET_HW(uartNum)->rs485_conf.tx_dly_num = 10;  // 10 bit times delay
+    // Use direct register access for compatibility across ESP32 variants
+    uart_ll_set_tx_idle_num(UART_LL_GET_HW(uartNum), 0);  // No extra idle after TX
+
+    // Set RS485 TX delay via low-level HAL (dl1_en enables 1-bit minimum delay)
+    // Note: ESP32-S3 field names may differ from ESP32
+#if CONFIG_IDF_TARGET_ESP32S3
+    UART_LL_GET_HW(uartNum)->rs485_conf_sync.dl1_en = 1;
+#else
+    UART_LL_GET_HW(uartNum)->rs485_conf.dl1_en = 1;
+#endif
 
 #if RS485_DE_INVERT
     // Invert DE polarity if needed (some boards have inverters on DE line)
