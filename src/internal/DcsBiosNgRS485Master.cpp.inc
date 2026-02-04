@@ -91,24 +91,28 @@
 		
 		// timeout for non-existing devices (1ms to receive first byte)
 		if (state == RX_WAIT_DATALENGTH && ((micros() - rx_start_time) > 1000)) {
+			// Only log if slave WAS present but stopped responding
+			bool was_present = slave_present[poll_address];
 			slave_present[poll_address] = false;
 			noInterrupts(); s8();
 			tx_byte(0); // send zero data length on behalf of the non-existing device
 			state = TIMEOUT_ZEROBYTE_SENT;
 			c8(); interrupts();
-			// Log this timeout - slave didn't respond in 1ms
-			messageBuffer.clear();
-			messageBuffer.put('['); messageBuffer.put('E'); messageBuffer.put('R'); messageBuffer.put('R');
-			messageBuffer.put(':'); messageBuffer.put('N'); messageBuffer.put('O'); messageBuffer.put('R');
-			messageBuffer.put('S'); messageBuffer.put('P'); messageBuffer.put(':');
-			messageBuffer.put('0' + (poll_address / 100) % 10);
-			messageBuffer.put('0' + (poll_address / 10) % 10);
-			messageBuffer.put('0' + poll_address % 10);
-			messageBuffer.put(']'); messageBuffer.put('\n');
-			noInterrupts();
-			messageBuffer.complete = true;
-			uart0.set_udrie();
-			interrupts();
+			// Log only when a previously-responding slave disappears
+			if (was_present) {
+				messageBuffer.clear();
+				messageBuffer.put('['); messageBuffer.put('E'); messageBuffer.put('R'); messageBuffer.put('R');
+				messageBuffer.put(':'); messageBuffer.put('N'); messageBuffer.put('O'); messageBuffer.put('R');
+				messageBuffer.put('S'); messageBuffer.put('P'); messageBuffer.put(':');
+				messageBuffer.put('0' + (poll_address / 100) % 10);
+				messageBuffer.put('0' + (poll_address / 10) % 10);
+				messageBuffer.put('0' + poll_address % 10);
+				messageBuffer.put(']'); messageBuffer.put('\n');
+				noInterrupts();
+				messageBuffer.complete = true;
+				uart0.set_udrie();
+				interrupts();
+			}
 		}
 		
 		if ((state == RX_WAIT_MSGTYPE || state == RX_WAIT_DATA || state == RX_WAIT_CHECKSUM)
