@@ -664,6 +664,11 @@ static void txTask(void* param) {
                 bus = bus->next;
             }
 
+            // Flush any stale data from RX buffer BEFORE sending
+            // This clears leftover data from previous cycles without
+            // risking removal of the Slave's response
+            uart_flush_input(request.uartNum);
+
 #if RS485_DE_MANUAL
             // Manual DE control - assert before TX
             if (bus && bus->getDePin() >= 0) {
@@ -683,12 +688,8 @@ static void txTask(void* param) {
             }
 #endif
 
-            // Flush any echo/noise from the RX buffer before expecting response
-            // This prevents reading our own TX echo as the Slave's response
-            uart_flush_input(request.uartNum);
-
-            // Small turnaround delay to let the bus settle
-            delayMicroseconds(50);
+            // Small turnaround delay - don't flush here, response may be arriving!
+            delayMicroseconds(20);
 
             // Clear txBusy flag
             if (bus) {
