@@ -101,10 +101,12 @@
 		
 		if ((state == RX_WAIT_MSGTYPE || state == RX_WAIT_DATA || state == RX_WAIT_CHECKSUM)
 		&& ((micros() - rx_start_time) > 5000)) {
-			// 5ms timeout waiting for rest of message - silently recover
+			// 5ms timeout waiting for rest of message
+			// Must call uart0.set_udrie() or polling will stop!
 			messageBuffer.clear();
 			noInterrupts(); s8();
 			messageBuffer.complete = true;
+			uart0.set_udrie();
 			state = IDLE;
 			c8(); interrupts();
 		}
