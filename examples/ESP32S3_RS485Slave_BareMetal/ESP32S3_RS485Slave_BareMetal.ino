@@ -1,8 +1,10 @@
 /**
- * ESP32-S3 RS485 SLAVE - HARDWARE RS485 MODE
+ * ESP32-S3 RS485 SLAVE - MANUAL DE CONTROL
  *
- * This is the "almost working" version from 2-3 days ago with UDP debug added.
- * Minimal changes to preserve the working behavior.
+ * Key changes:
+ * 1. Uses manual DE control (GPIO) instead of UART_MODE_RS485_HALF_DUPLEX
+ * 2. Matches ESP32 Master approach for consistent timing
+ * 3. Protocol: Length byte = DATA bytes only (not including msgtype)
  */
 
 #define SLAVE_ADDRESS 1
@@ -496,10 +498,36 @@ static volatile int64_t lastRxTime = 0;
 static uart_port_t uartNum = (uart_port_t)RS485_UART_NUM;
 
 // ============================================================================
-// HARDWARE RS485 INITIALIZATION - EXACTLY AS OLD VERSION
+// MANUAL DE CONTROL - Like the ESP32 Master for precise timing
 // ============================================================================
 
+static gpio_num_t dePin = (gpio_num_t)RS485_DE_PIN;
+
+static void setDE(bool high) {
+    gpio_set_level(dePin, high ? 1 : 0);
+}
+
 static void initRS485Hardware() {
+    // =========================================================================
+    // GPIO: Manual DE pin control (NOT using UART's auto RS485 mode!)
+    // This matches the ESP32 Master approach for consistent timing
+    // =========================================================================
+#if RS485_DE_PIN >= 0
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << dePin),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io_conf);
+    setDE(false);  // Start in RX mode
+#endif
+
+    // =========================================================================
+    // UART: Normal mode (NOT RS485 auto mode!)
+    // We handle DE manually for precise timing control
+    // =========================================================================
     uart_config_t uart_config = {
         .baud_rate = RS485_BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
@@ -507,28 +535,22 @@ static void initRS485Hardware() {
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .rx_flow_ctrl_thresh = 0,
-        .source_clk = UART_SCLK_DEFAULT  // OLD version used DEFAULT, not XTAL!
+        .source_clk = UART_SCLK_DEFAULT
     };
 
     ESP_ERROR_CHECK(uart_driver_install(uartNum, UART_RX_BUFFER_SIZE,
                                          UART_TX_BUFFER_SIZE, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(uartNum, &uart_config));
 
-#if RS485_DE_PIN >= 0
-    ESP_ERROR_CHECK(uart_set_pin(uartNum,
-                                  RS485_TX_PIN,
-                                  RS485_RX_PIN,
-                                  RS485_DE_PIN,
-                                  UART_PIN_NO_CHANGE));
-    ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX));
-#else
+    // Set pins WITHOUT RTS pin - we control DE manually
     ESP_ERROR_CHECK(uart_set_pin(uartNum,
                                   RS485_TX_PIN,
                                   RS485_RX_PIN,
                                   UART_PIN_NO_CHANGE,
                                   UART_PIN_NO_CHANGE));
+
+    // Use normal UART mode, NOT RS485 auto mode
     ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_UART));
-#endif
 
     ESP_ERROR_CHECK(uart_set_rx_timeout(uartNum, RX_TIMEOUT_SYMBOLS));
     uart_flush_input(uartNum);
@@ -538,7 +560,7 @@ static void initRS485Hardware() {
 }
 
 // ============================================================================
-// TX HANDLING - EXACTLY AS OLD VERSION
+// TX HANDLING - MANUAL DE CONTROL (like ESP32 Master)
 // ============================================================================
 
 static void sendResponse() {
@@ -556,13 +578,25 @@ static void sendResponse() {
 
     size_t totalBytes = 3 + len;
 
-    // Small delay before TX to let transceiver fully switch
-    // The AVR's tx_delay_byte() creates ~40µs delay - let's try similar
-    delayMicroseconds(MICROSECOND_DELAY);
+    // =========================================================================
+    // MANUAL DE CONTROL SEQUENCE:
+    // 1. Set DE HIGH (enable transmitter)
+    // 2. Wait for DE to stabilize before TX starts
+    // 3. Write all bytes to UART FIFO at once
+    // 4. Wait for TX to complete (all bytes shifted out)
+    // 5. Set DE LOW (return to receive mode)
+    // =========================================================================
+#if RS485_DE_PIN >= 0
+    setDE(true);
+    delayMicroseconds(MICROSECOND_DELAY);  // Let DE stabilize before first byte
+#endif
 
-    // Simple TX - hardware handles DE
     uart_write_bytes(uartNum, (const char*)packet, totalBytes);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
+
+#if RS485_DE_PIN >= 0
+    setDE(false);  // Return to RX mode
+#endif
 
     messageBuffer.clear();
     messageBuffer.complete = false;
@@ -573,9 +607,19 @@ static void sendResponse() {
 
 static void sendZeroLengthResponse() {
     uint8_t response = 0;
-    delayMicroseconds(MICROSECOND_DELAY);  // Same delay as sendResponse
+
+#if RS485_DE_PIN >= 0
+    setDE(true);
+    delayMicroseconds(MICROSECOND_DELAY);
+#endif
+
     uart_write_bytes(uartNum, (const char*)&response, 1);
     ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(10)));
+
+#if RS485_DE_PIN >= 0
+    setDE(false);
+#endif
+
     rs485State = STATE_RX_WAIT_ADDRESS;
 }
 
