@@ -559,11 +559,10 @@ static inline void IRAM_ATTR deStabilizationDelay() {
     for (volatile int i = 0; i < 120; i++) { __asm__ __volatile__("nop"); }
 }
 
-// Helper: write one byte and wait for FIFO space (not full idle)
-static inline void IRAM_ATTR txByteWaitFifo(uint8_t b) {
-    // Wait until FIFO has space (not waiting for complete idle - faster)
-    while (uart_ll_get_txfifo_len(uartHw) >= 127);
+// Helper: write one byte and wait for it to transmit (true byte-by-byte like AVR)
+static inline void IRAM_ATTR txByteWaitIdle(uint8_t b) {
     uart_ll_write_txfifo(uartHw, &b, 1);
+    while (!uart_ll_is_tx_idle(uartHw));  // Wait for byte to fully transmit
 }
 
 static void IRAM_ATTR sendResponseISR() {
@@ -578,15 +577,15 @@ static void IRAM_ATTR sendResponseISR() {
 
 #if TX_MODE_BYTE_BY_BYTE
     // === BYTE-BY-BYTE MODE ===
-    // Send each byte individually, wait for FIFO space between bytes
-    txByteWaitFifo(len);         // Length byte
-    txByteWaitFifo(0);           // MsgType = 0
+    // Send each byte individually, wait for TX idle after each (like AVR UDRE)
+    txByteWaitIdle(len);         // Length byte
+    txByteWaitIdle(0);           // MsgType = 0
 
     for (uint8_t i = 0; i < len; i++) {
-        txByteWaitFifo(messageBuffer.getISR());
+        txByteWaitIdle(messageBuffer.getISR());
     }
 
-    txByteWaitFifo(0x72);        // Checksum
+    txByteWaitIdle(0x72);        // Checksum
 #else
     // === BUFFERED MODE ===
     // Build complete response in local buffer for continuous transmission
