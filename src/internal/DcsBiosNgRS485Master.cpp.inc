@@ -89,8 +89,9 @@
 			}
 		}
 		
-		// timeout for non-existing devices (1ms to receive first byte)
-		if (state == RX_WAIT_DATALENGTH && ((micros() - rx_start_time) > 1000)) {
+		// timeout for non-existing devices (2ms to receive first byte)
+		// Increased from 1ms to give ESP32 polling-based slaves more time
+		if (state == RX_WAIT_DATALENGTH && ((micros() - rx_start_time) > 2000)) {
 			slave_present[poll_address] = false;
 			noInterrupts(); s8();
 			tx_byte(0); // send zero data length on behalf of the non-existing device
