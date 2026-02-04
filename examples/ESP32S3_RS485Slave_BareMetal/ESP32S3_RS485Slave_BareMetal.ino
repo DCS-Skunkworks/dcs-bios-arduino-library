@@ -18,22 +18,34 @@
 #define RS485_UART_NUM  1
 #define RS485_BAUD_RATE 250000
 
+// ============================================================================
+// CLOCK SOURCE SELECTION
+// Options:
+//   UART_SCLK_DEFAULT - APB clock (~80MHz) - most common
+//   UART_SCLK_XTAL    - Crystal clock (40MHz) - more stable
+//   UART_SCLK_RTC     - RTC clock (8MHz) - low power but less accurate
+// ============================================================================
+#define UART_CLOCK_SOURCE   UART_SCLK_DEFAULT
+
 // Buffer Sizes
 #define UART_RX_BUFFER_SIZE    512
 #define UART_TX_BUFFER_SIZE    256
 #define MESSAGE_BUFFER_SIZE    64
 
-// Timing Constants - EXACTLY as old version
-#define SYNC_TIMEOUT_US     500     // 500µs silence = sync detected [ IS THIS NEEDED? Protocol Compliance?]
-#define RX_TIMEOUT_SYMBOLS  12      // How about this one? what value would be optimal? is this for protocol compliance?
-#define RX_FRAME_TIMEOUT_US 6000   // I assume this is for mid frame timeouts?
-#define MICROSECOND_DELAY   40      // and I assume this is to allow Rx/Tx switching 
-
+// ============================================================================
+// TIMING CONFIGURATION - Tweak these to debug corruption issues
+// ============================================================================
+#define SYNC_TIMEOUT_US      500    // 500µs silence = sync detected
+#define RX_TIMEOUT_SYMBOLS   12     // UART RX timeout in bit periods
+#define FRAME_TIMEOUT_US     6000   // Reset if stuck mid-frame (0 = disabled)
+#define PRE_TX_DELAY_US      40     // Delay after DE high, before first byte
+#define POST_TX_DELAY_US     5      // Delay after last byte, before DE low
 
 // ============================================================================
-// UDP DEBUG
+// DEBUG OPTIONS
 // ============================================================================
 #define UDP_DEBUG_ENABLE    1
+#define DEBUG_TX_HEX        1       // Log transmitted bytes as hex
 #define WIFI_SSID           "TestNetwork"
 #define WIFI_PASSWORD       "TestingOnly"
 
@@ -535,7 +547,7 @@ static void initRS485Hardware() {
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .rx_flow_ctrl_thresh = 0,
-        .source_clk = UART_SCLK_DEFAULT
+        .source_clk = UART_CLOCK_SOURCE  // Configurable clock source
     };
 
     ESP_ERROR_CHECK(uart_driver_install(uartNum, UART_RX_BUFFER_SIZE,
@@ -604,7 +616,7 @@ static void sendResponse() {
 
 #if RS485_DE_PIN >= 0
     setDE(true);
-    delayMicroseconds(MICROSECOND_DELAY);  // Let DE stabilize before first byte
+    delayMicroseconds(PRE_TX_DELAY_US);  // Configurable pre-TX delay
 #endif
 
     // Direct FIFO write - no FreeRTOS calls
@@ -615,9 +627,7 @@ static void sendResponse() {
         // Spin until last bit shifted out
     }
 
-    // Small delay after last bit to ensure stop bit fully transmitted
-    // before releasing the bus (AVR has similar timing due to ISR latency)
-    delayMicroseconds(5);
+    delayMicroseconds(POST_TX_DELAY_US);  // Configurable post-TX delay
 
 #if RS485_DE_PIN >= 0
     setDE(false);  // Return to RX mode
@@ -629,7 +639,17 @@ static void sendResponse() {
     messageBuffer.complete = false;
     rs485State = STATE_RX_WAIT_ADDRESS;
 
+    // Debug logging - show actual bytes transmitted
+#if DEBUG_TX_HEX
+    static char hexBuf[128];
+    int pos = snprintf(hexBuf, sizeof(hexBuf), "TX[%d]: ", (int)totalBytes);
+    for (size_t i = 0; i < totalBytes && pos < 120; i++) {
+        pos += snprintf(hexBuf + pos, sizeof(hexBuf) - pos, "%02X ", packet[i]);
+    }
+    udpDbgSend("%s", hexBuf);
+#else
     udpDbgSend("TX len=%d", len);
+#endif
 }
 
 static void sendZeroLengthResponse() {
@@ -639,7 +659,7 @@ static void sendZeroLengthResponse() {
 
 #if RS485_DE_PIN >= 0
     setDE(true);
-    delayMicroseconds(MICROSECOND_DELAY);
+    delayMicroseconds(PRE_TX_DELAY_US);
 #endif
 
     writeToFifo(&response, 1);
@@ -648,7 +668,7 @@ static void sendZeroLengthResponse() {
         // Spin until last bit shifted out
     }
 
-    delayMicroseconds(5);  // Ensure stop bit fully transmitted
+    delayMicroseconds(POST_TX_DELAY_US);
 
 #if RS485_DE_PIN >= 0
     setDE(false);
@@ -667,10 +687,17 @@ static void processRS485() {
     int64_t now = esp_timer_get_time();
 
     // =========================================================================
-    // NO FRAME TIMEOUT - AVR slave doesn't have one!
-    // The AVR relies purely on byte-driven state machine + 500µs SYNC gap.
-    // Our previous 5000/6000µs timeout was causing issues with long exports.
+    // FRAME TIMEOUT - Reset if stuck mid-frame too long
+    // Note: AVR doesn't have this, but ESP32 needs it to recover from noise
+    // Set FRAME_TIMEOUT_US to 0 to disable (like AVR)
     // =========================================================================
+#if FRAME_TIMEOUT_US > 0
+    if (rs485State != STATE_SYNC && rs485State != STATE_RX_WAIT_ADDRESS) {
+        if ((now - lastRxTime) >= FRAME_TIMEOUT_US) {
+            rs485State = STATE_SYNC;
+        }
+    }
+#endif
 
     // Sync detection - 500µs silence means ready for new frame (like AVR)
     if (rs485State == STATE_SYNC && (now - lastRxTime) >= SYNC_TIMEOUT_US) {
