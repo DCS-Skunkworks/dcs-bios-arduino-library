@@ -678,9 +678,17 @@ static void txTask(void* param) {
 #if RS485_DE_MANUAL
             // Manual DE control - release after TX
             if (bus && bus->getDePin() >= 0) {
+                delayMicroseconds(10);  // Ensure stop bit completes
                 digitalWrite(bus->getDePin(), LOW);   // Enable receiver
             }
 #endif
+
+            // Flush any echo/noise from the RX buffer before expecting response
+            // This prevents reading our own TX echo as the Slave's response
+            uart_flush_input(request.uartNum);
+
+            // Small turnaround delay to let the bus settle
+            delayMicroseconds(50);
 
             // Clear txBusy flag
             if (bus) {
