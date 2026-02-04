@@ -38,19 +38,12 @@
 #define SYNC_TIMEOUT_US      500    // 500µs silence = sync detected
 
 // ============================================================================
-// TX MODE SELECTION - For A/B testing
+// TX MODE SELECTION
 // ============================================================================
 // 0 = Buffered mode: Build response in buffer, write all at once to FIFO
-// 1 = Byte-by-byte mode: Write each byte individually, wait for FIFO space
-#define TX_MODE_BYTE_BY_BYTE    0
-
-// ============================================================================
-// DE WARMUP MODE SELECTION
-// ============================================================================
-// 0 = Simple delay: Enable DE, wait ~50µs, then send (current working approach)
-// 1 = AVR-style: Write dummy byte with DE LOW (warms up UART), wait for TX,
-//                then enable DE and send real data (exactly like AVR does)
-#define DE_WARMUP_AVR_STYLE     0
+// 1 = Byte-by-byte mode: Write each byte individually, wait for TX idle
+//     (default - mimics AVR behavior, better pacing with FreeRTOS tasks)
+#define TX_MODE_BYTE_BY_BYTE    1
 
 // ============================================================================
 // DEBUG OPTIONS
@@ -568,31 +561,11 @@ static inline void IRAM_ATTR txByteWaitIdle(uint8_t b) {
 }
 
 // Warm up UART and enable DE for transmission
+// Enable DE, wait ~50µs (one byte time at 250kbaud) for transceiver to stabilize
 static inline void IRAM_ATTR prepareForTransmit() {
-#if DE_WARMUP_AVR_STYLE
-    // === AVR-STYLE WARM-UP ===
-    // Write dummy byte with DE LOW - byte "transmits" internally but doesn't
-    // go on wire. This warms up UART timing. Then enable DE for real data.
-    // This is exactly what AVR's tx_delay_byte() does.
-    uint8_t dummy = 0x00;
-    uart_ll_write_txfifo(uartHw, &dummy, 1);  // Write dummy (DE still low)
-
-    // Wait for FIFO to drain (byte moved to shift register)
-    while (uart_ll_get_txfifo_len(uartHw) > 0);
-
-    // Wait for shift register to complete (~45µs for one byte at 250kbaud)
-    // Can't rely on uart_ll_is_tx_idle() when DE is low - may return immediately
-    for (volatile int i = 0; i < 2700; i++) { __asm__ __volatile__("nop"); }
-
-    uart_ll_rxfifo_rst(uartHw);               // Clear any echo of dummy
-    setDE_ISR(true);                          // NOW enable DE for real data
-#else
-    // === SIMPLE DELAY MODE ===
-    // Enable DE, wait ~50µs (one byte time), then send
     setDE_ISR(true);
     // ~50µs delay at 240MHz - matches AVR's one-byte warm-up time
     for (volatile int i = 0; i < 3000; i++) { __asm__ __volatile__("nop"); }
-#endif
 }
 
 static void IRAM_ATTR sendResponseISR() {
