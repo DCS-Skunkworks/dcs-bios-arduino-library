@@ -550,11 +550,6 @@ static void initRS485Hardware() {
     // - Handles timing at hardware level (more precise than software)
     ESP_ERROR_CHECK(uart_set_mode(uartNum, UART_MODE_RS485_HALF_DUPLEX));
 
-    // CRITICAL: Invert RTS signal polarity
-    // ESP32's RTS is active LOW by default, but MAX13488E needs DE HIGH to transmit
-    // Without this, DE stays LOW and transceiver never enables TX driver
-    ESP_ERROR_CHECK(uart_set_line_inverse(uartNum, UART_SIGNAL_RTS_INV));
-
     ESP_ERROR_CHECK(uart_set_rx_timeout(uartNum, RX_TIMEOUT_SYMBOLS));
     uart_flush_input(uartNum);
 
@@ -568,18 +563,10 @@ static void initRS485Hardware() {
 // TX HANDLING - HARDWARE RS485 MODE
 // ============================================================================
 //
-// With UART_MODE_RS485_HALF_DUPLEX, the hardware automatically:
-// - Asserts DE when we write to TX FIFO
-// - Keeps DE high during transmission
-// - Deasserts DE after last stop bit
-// No manual GPIO control needed!
+// With UART_MODE_RS485_HALF_DUPLEX, the hardware automatically controls DE.
+// IMPORTANT: Must use uart_write_bytes() (not direct FIFO writes) for the
+// driver to properly trigger hardware RS485 DE control.
 // ============================================================================
-
-// Spinlock for critical sections - prevents WiFi/radio ISRs from corrupting TX timing
-static portMUX_TYPE txMutex = portMUX_INITIALIZER_UNLOCKED;
-
-// Get the hardware UART device pointer for direct register access
-static uart_dev_t* const uartHw = &UART1;
 
 static void sendResponse() {
     uint8_t packet[MESSAGE_BUFFER_SIZE + 4];
@@ -596,25 +583,15 @@ static void sendResponse() {
 
     size_t totalBytes = 3 + len;
 
-    // =========================================================================
-    // CRITICAL SECTION - Hardware RS485 mode handles DE automatically
-    // We just need to write to FIFO and wait for completion
-    // =========================================================================
-    portENTER_CRITICAL(&txMutex);
+    // Use uart_write_bytes() which properly triggers hardware RS485 DE control
+    // Note: No critical section since uart_write_bytes uses FreeRTOS internally
+    uart_write_bytes(uartNum, packet, totalBytes);
 
-    // Write all bytes to FIFO - hardware will assert DE automatically
-    uart_ll_write_txfifo(uartHw, packet, totalBytes);
-
-    // Wait for ALL bytes to complete transmission
-    // Hardware will deassert DE after last stop bit
-    while (!uart_ll_is_tx_idle(uartHw)) {
-        // Spin
-    }
+    // Wait for transmission to complete
+    ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(100)));
 
     // Flush any RX echo from our own transmission
-    uart_ll_rxfifo_rst(uartHw);
-
-    portEXIT_CRITICAL(&txMutex);
+    uart_flush_input(uartNum);
 
     messageBuffer.clear();
     messageBuffer.complete = false;
@@ -636,20 +613,10 @@ static void sendResponse() {
 static void sendZeroLengthResponse() {
     uint8_t zero = 0;
 
-    portENTER_CRITICAL(&txMutex);
-
-    // Write zero-length response - hardware handles DE
-    uart_ll_write_txfifo(uartHw, &zero, 1);
-
-    // Wait for byte to complete
-    while (!uart_ll_is_tx_idle(uartHw)) {
-        // Spin
-    }
-
-    // Flush any RX echo
-    uart_ll_rxfifo_rst(uartHw);
-
-    portEXIT_CRITICAL(&txMutex);
+    // Use uart_write_bytes() for proper hardware RS485 DE control
+    uart_write_bytes(uartNum, &zero, 1);
+    ESP_ERROR_CHECK(uart_wait_tx_done(uartNum, pdMS_TO_TICKS(100)));
+    uart_flush_input(uartNum);
 
     rs485State = STATE_RX_WAIT_ADDRESS;
 }
