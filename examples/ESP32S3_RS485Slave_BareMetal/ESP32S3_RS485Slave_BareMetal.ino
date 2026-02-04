@@ -576,7 +576,14 @@ static inline void IRAM_ATTR prepareForTransmit() {
     // This is exactly what AVR's tx_delay_byte() does.
     uint8_t dummy = 0x00;
     uart_ll_write_txfifo(uartHw, &dummy, 1);  // Write dummy (DE still low)
-    while (!uart_ll_is_tx_idle(uartHw));       // Wait for "transmission"
+
+    // Wait for FIFO to drain (byte moved to shift register)
+    while (uart_ll_get_txfifo_len(uartHw) > 0);
+
+    // Wait for shift register to complete (~45µs for one byte at 250kbaud)
+    // Can't rely on uart_ll_is_tx_idle() when DE is low - may return immediately
+    for (volatile int i = 0; i < 2700; i++) { __asm__ __volatile__("nop"); }
+
     uart_ll_rxfifo_rst(uartHw);               // Clear any echo of dummy
     setDE_ISR(true);                          // NOW enable DE for real data
 #else
