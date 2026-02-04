@@ -554,9 +554,11 @@ static inline void IRAM_ATTR setDE_ISR(bool high) {
 // ============================================================================
 
 // Small delay for DE pin stabilization (inline for speed)
+// AVR uses a full byte (~40µs at 250kbaud) as warm-up before enabling DE
+// We match this timing to ensure UART is fully ready
 static inline void IRAM_ATTR deStabilizationDelay() {
-    // ~2µs delay at 240MHz - lets transceiver switch to TX mode
-    for (volatile int i = 0; i < 120; i++) { __asm__ __volatile__("nop"); }
+    // ~50µs delay at 240MHz - matches AVR's one-byte warm-up time
+    for (volatile int i = 0; i < 3000; i++) { __asm__ __volatile__("nop"); }
 }
 
 // Helper: write one byte and wait for it to transmit (true byte-by-byte like AVR)
