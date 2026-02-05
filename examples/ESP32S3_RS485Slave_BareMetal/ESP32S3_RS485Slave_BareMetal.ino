@@ -1,5 +1,5 @@
 /**
- * ESP32-S3 RS485 SLAVE - INTERRUPT-DRIVEN (AVR-style)
+ * ESP32 RS485 SLAVE - INTERRUPT-DRIVEN (AVR-style)
  *
  * Key design:
  * 1. UART RX interrupt fires immediately when byte arrives
@@ -14,7 +14,7 @@
 
 #define SLAVE_ADDRESS 1
 
-// Pin Configuration (Waveshare ESP32-S3-RS485-CAN)
+// Pin Configuration
 #define RS485_TX_PIN    17
 #define RS485_RX_PIN    18
 #define RS485_DE_PIN    -1    // Set to -1 for auto-direction transceivers
@@ -48,12 +48,12 @@
 // 0 = Buffered mode: Build response in buffer, write all at once to FIFO
 // 1 = Byte-by-byte mode: Write each byte individually, wait for TX idle
 //     (default - mimics AVR behavior, better pacing with FreeRTOS tasks)
-#define TX_MODE_BYTE_BY_BYTE    0
+#define TX_MODE_BYTE_BY_BYTE    1
 
 // ============================================================================
 // DEBUG OPTIONS
 // ============================================================================
-#define UDP_DEBUG_ENABLE    1
+#define UDP_DEBUG_ENABLE    0
 #define WIFI_SSID           "TestNetwork"
 #define WIFI_PASSWORD       "TestingOnly"
 
@@ -1015,10 +1015,10 @@ LED mcReadyLed(0x740C, 0x8000, MC_READY_PIN);
 void setup() {
     // Initialize Serial for debug output
     Serial.begin(115200);
-    delay(1000);  // Give serial time to connect
+    delay(3000);  // Give serial time to connect
     Serial.println();
     Serial.println("===========================================");
-    Serial.println("ESP32-S3 RS485 Slave - ISR Mode Starting...");
+    Serial.println("ESP32 RS485 Slave - ISR Mode Starting...");
     Serial.printf("Slave Address: %d\n", SLAVE_ADDRESS);
     Serial.printf("Baud Rate: %d\n", RS485_BAUD_RATE);
     Serial.printf("TX Pin: %d, RX Pin: %d, DE Pin: %d\n", RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN);
