@@ -1,33 +1,48 @@
 /**
- * ESP32-S3 RS485 SLAVE - INTERRUPT-DRIVEN (AVR-style)
+ * ESP32 RS485 SLAVE - Dual-Path Architecture
  *
- * Key design:
- * 1. UART RX interrupt fires immediately when byte arrives
- * 2. State machine runs IN the ISR - no polling latency
- * 3. Response sent immediately from ISR when poll detected
- * 4. This matches AVR's RXC interrupt behavior exactly
+ * Two operating modes selected at compile time:
  *
- * The main loop only handles non-time-critical tasks:
- * - Input polling (switches, buttons)
- * - Export data parsing (LED updates)
+ *   USE_ISR_MODE 1 (default):
+ *     - UART RX interrupt fires immediately when byte arrives
+ *     - State machine runs IN the ISR - no polling latency
+ *     - Response sent immediately from ISR when poll detected
+ *     - Matches AVR's RXC interrupt behavior exactly
+ *     - Uses periph_module_enable (no driver install/delete) for C6 compatibility
+ *     - Adds RISC-V fence instruction for FIFO read stability on C3/C6/H2
+ *
+ *   USE_ISR_MODE 0 (fallback):
+ *     - Uses ESP-IDF UART driver for portable RX/TX
+ *     - State machine runs in main loop (tight polling)
+ *     - Slightly higher latency but works on any ESP32 variant
+ *     - Use this if ISR mode doesn't work on your specific chip
+ *
+ * Both modes work on: ESP32, S2, S3, C3, C6, H2
  */
 
 #define SLAVE_ADDRESS 1
 
-// Pin Configuration (Waveshare ESP32-S3-RS485-CAN)
-#define RS485_TX_PIN    17
-#define RS485_RX_PIN    18
-#define RS485_DE_PIN    -1    // Set to -1 for auto-direction transceivers
+// Pin Configuration
+#define RS485_TX_PIN    17    // Yellow Cable 
+#define RS485_RX_PIN    18    // White Cable
+#define RS485_DE_PIN    21    // Set to -1 for auto-direction transceivers
 
 // UART Configuration
 #define RS485_UART_NUM  1
 #define RS485_BAUD_RATE 250000
 
 // ============================================================================
+// OPERATING MODE SELECTION
+// ============================================================================
+// 1 = ISR-driven (lowest latency, like AVR)
+// 0 = Driver-based (portable fallback)
+#define USE_ISR_MODE    1
+
+// ============================================================================
 // CLOCK SOURCE SELECTION
 // ============================================================================
-// Note: ESP-IDF v5.x uses soc_module_clk_t for UART clock
-// We use UART_SCLK_DEFAULT which maps to APB clock (80MHz)
+// Uses UART_SCLK_DEFAULT for portability across all ESP32 variants
+// (ESP32, S2, S3, C3, C6 - works regardless of actual APB clock frequency)
 
 // Buffer Sizes
 #define MESSAGE_BUFFER_SIZE    64
@@ -37,33 +52,80 @@
 // ============================================================================
 #define SYNC_TIMEOUT_US      500    // 500µs silence = sync detected
 
+// TX Warm-up delays in MICROSECONDS (portable across all ESP32 variants)
+// These give the transceiver time to switch to TX mode before data is sent
+#define TX_WARMUP_DELAY_MANUAL_US    50    // Manual DE: wait after DE asserted
+#define TX_WARMUP_DELAY_AUTO_US      50    // Auto-direction: wait for RX→TX switch
+#define TX_COOLDOWN_DELAY_US          1    // Post-TX delay before DE deassert (0=disabled)
+                                           // Covers transceiver TX→RX turnaround time
+
 // ============================================================================
-// TX MODE SELECTION
+// TX MODE SELECTION (ISR mode only)
 // ============================================================================
 // 0 = Buffered mode: Build response in buffer, write all at once to FIFO
 // 1 = Byte-by-byte mode: Write each byte individually, wait for TX idle
 //     (default - mimics AVR behavior, better pacing with FreeRTOS tasks)
-#define TX_MODE_BYTE_BY_BYTE    0
+#define TX_MODE_BYTE_BY_BYTE    1
 
 // ============================================================================
 // DEBUG OPTIONS
 // ============================================================================
-#define UDP_DEBUG_ENABLE    1
+#define UDP_DEBUG_ENABLE    0
 #define WIFI_SSID           "TestNetwork"
 #define WIFI_PASSWORD       "TestingOnly"
+
+// ============================================================================
+// INCLUDES
+// ============================================================================
 
 #include <Arduino.h>
 #include <driver/uart.h>
 #include <driver/gpio.h>
-#include <driver/periph_ctrl.h>
+#include <rom/ets_sys.h>        // For ets_delay_us() - portable across all ESP32 variants
+#include <soc/soc_caps.h>       // For SOC_GPIO_PIN_COUNT
+#include <esp_timer.h>
+
+#if USE_ISR_MODE
+// ISR mode needs direct hardware access
 #include <hal/uart_ll.h>
 #include <hal/gpio_ll.h>
 #include <soc/uart_struct.h>
 #include <soc/gpio_struct.h>
 #include <soc/uart_periph.h>
-#include <esp_timer.h>
 #include <esp_intr_alloc.h>
 #include <esp_rom_gpio.h>
+// Peripheral module control - handle both old and new ESP-IDF locations
+#if __has_include(<esp_private/periph_ctrl.h>)
+#include <esp_private/periph_ctrl.h>
+#else
+#include <driver/periph_ctrl.h>
+#endif
+#include <soc/periph_defs.h>
+#endif // USE_ISR_MODE
+
+// ============================================================================
+// UART HARDWARE MAPPING (ISR mode)
+// ============================================================================
+
+#if USE_ISR_MODE
+#if RS485_UART_NUM == 0
+static uart_dev_t* const uartHw = &UART0;
+#define RS485_PERIPH_MODULE PERIPH_UART0_MODULE
+#elif RS485_UART_NUM == 1
+static uart_dev_t* const uartHw = &UART1;
+#define RS485_PERIPH_MODULE PERIPH_UART1_MODULE
+#elif RS485_UART_NUM == 2
+static uart_dev_t* const uartHw = &UART2;
+#define RS485_PERIPH_MODULE PERIPH_UART2_MODULE
+#else
+#error "Invalid RS485_UART_NUM (must be 0, 1, or 2)"
+#endif
+static intr_handle_t uartIntrHandle;
+#endif // USE_ISR_MODE
+
+// ============================================================================
+// UDP DEBUG
+// ============================================================================
 
 #if UDP_DEBUG_ENABLE
 #include <WiFi.h>
@@ -82,7 +144,10 @@ void udpDbgInit() {
 void udpDbgCheck() {
     if (!udpDbgConnected && WiFi.status() == WL_CONNECTED) {
         udpDbgConnected = true;
-        udpDbgSend("=== SLAVE %d ONLINE (ISR MODE) === IP=%s", SLAVE_ADDRESS, WiFi.localIP().toString().c_str());
+        udpDbgSend("=== SLAVE %d ONLINE (%s) === IP=%s",
+                    SLAVE_ADDRESS,
+                    USE_ISR_MODE ? "ISR MODE" : "DRIVER MODE",
+                    WiFi.localIP().toString().c_str());
     }
 }
 
@@ -265,7 +330,6 @@ public:
     bool hasUpdatedData() { return userDirty; }
 };
 
-// Parser instance - processes export data queued by ISR
 class ProtocolParser {
 private:
     uint8_t state;
@@ -501,7 +565,7 @@ bool tryToSendDcsBiosMessage(const char* msg, const char* arg) {
 }
 
 // ============================================================================
-// RS485 STATE MACHINE - RUNS IN ISR!
+// RS485 STATE MACHINE
 // ============================================================================
 
 enum RS485State {
@@ -529,22 +593,23 @@ static volatile uint8_t rxMsgType = 0;
 static volatile uint8_t rxtxLen = 0;
 static volatile RxDataType rxDataType = RXDATA_IGNORE;
 static volatile int64_t lastRxTime = 0;
+static volatile uint32_t rxByteCount = 0;
 
-// Direct hardware pointers for ISR
-static uart_dev_t* const uartHw = &UART1;
-static intr_handle_t uartIntrHandle;
+// ############################################################################
+//
+//    ISR MODE IMPLEMENTATION
+//
+// ############################################################################
+
+#if USE_ISR_MODE
 
 // ============================================================================
-// DIRECT GPIO CONTROL (faster than gpio_set_level in ISR)
+// DIRECT GPIO CONTROL (portable across Xtensa and RISC-V)
 // ============================================================================
 
 #if RS485_DE_PIN >= 0
 static inline void IRAM_ATTR setDE_ISR(bool high) {
-    if (high) {
-        GPIO.out_w1ts = (1ULL << RS485_DE_PIN);
-    } else {
-        GPIO.out_w1tc = (1ULL << RS485_DE_PIN);
-    }
+    gpio_ll_set_level(&GPIO, (gpio_num_t)RS485_DE_PIN, high ? 1 : 0);
 }
 #else
 #define setDE_ISR(x)
@@ -560,15 +625,16 @@ static inline void IRAM_ATTR txByteWaitIdle(uint8_t b) {
     while (!uart_ll_is_tx_idle(uartHw));  // Wait for byte to fully transmit
 }
 
-// Warm up UART and enable DE for transmission (manual DE control only)
+// Warm up UART and enable DE for transmission
 static inline void IRAM_ATTR prepareForTransmit() {
 #if RS485_DE_PIN >= 0
-    // Manual DE control: enable driver and wait for transceiver to stabilize
+    // Manual DE control: enable driver, then wait for stabilization
     setDE_ISR(true);
-    // ~50µs delay at 240MHz - matches AVR's one-byte warm-up time
-    for (volatile int i = 0; i < 3000; i++) { __asm__ __volatile__("nop"); }
+    ets_delay_us(TX_WARMUP_DELAY_MANUAL_US);
+#else
+    // Auto-direction: wait for transceiver to detect TX and switch
+    ets_delay_us(TX_WARMUP_DELAY_AUTO_US);
 #endif
-    // Auto-direction transceivers: no delay needed, they switch automatically
 }
 
 static void IRAM_ATTR sendResponseISR() {
@@ -613,6 +679,11 @@ static void IRAM_ATTR sendResponseISR() {
     // Wait for transmission to fully complete
     while (!uart_ll_is_tx_idle(uartHw));
 
+#if RS485_DE_PIN >= 0 && TX_COOLDOWN_DELAY_US > 0
+    // Allow transceiver TX→RX turnaround before releasing DE
+    ets_delay_us(TX_COOLDOWN_DELAY_US);
+#endif
+
     // Disable driver
     setDE_ISR(false);
 
@@ -644,6 +715,11 @@ static void IRAM_ATTR sendZeroLengthResponseISR() {
     // Wait for transmission to complete
     while (!uart_ll_is_tx_idle(uartHw));
 
+#if RS485_DE_PIN >= 0 && TX_COOLDOWN_DELAY_US > 0
+    // Allow transceiver TX→RX turnaround before releasing DE
+    ets_delay_us(TX_COOLDOWN_DELAY_US);
+#endif
+
     // Disable driver
     setDE_ISR(false);
 
@@ -669,7 +745,14 @@ static void IRAM_ATTR uart_isr_handler(void *arg) {
     while (uart_ll_get_rxfifo_len(uartHw) > 0) {
         uint8_t c;
         uart_ll_read_rxfifo(uartHw, &c, 1);
+#ifdef __riscv
+        // RISC-V (C3, C6, H2): memory fence ensures FIFO read pointer update
+        // propagates before next FIFO length check. Without this, the CPU can
+        // read faster than the pointer updates, causing stale/duplicate reads.
+        __asm__ __volatile__("fence");
+#endif
 
+        rxByteCount++;
         int64_t now = esp_timer_get_time();
 
         // Sync detection - if gap > 500µs, reset to wait for address
@@ -802,14 +885,11 @@ static void IRAM_ATTR uart_isr_handler(void *arg) {
 }
 
 // ============================================================================
-// HARDWARE INITIALIZATION
+// ISR MODE - HARDWARE INITIALIZATION
 // ============================================================================
 
 static void initRS485Hardware() {
     Serial.println("  [1] Configuring DE GPIO pin...");
-    // =========================================================================
-    // GPIO: DE pin for RS485 direction control
-    // =========================================================================
 #if RS485_DE_PIN >= 0
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << RS485_DE_PIN),
@@ -822,69 +902,53 @@ static void initRS485Hardware() {
     setDE_ISR(false);  // Start in RX mode
     Serial.println("  [1] DE GPIO configured OK");
 #else
-    Serial.println("  [1] No DE pin configured");
+    Serial.println("  [1] No DE pin (auto-direction)");
 #endif
 
     // =========================================================================
-    // BARE-METAL UART SETUP (no driver - we handle everything ourselves)
-    // This gives us full control and lowest latency like AVR
+    // BARE-METAL UART SETUP
+    // Uses periph_module_enable + uart_param_config WITHOUT installing the
+    // full UART driver. This avoids the stale interrupt allocation issue that
+    // prevents ISR registration on ESP32-C6 when using driver install/delete.
     // =========================================================================
 
-    Serial.println("  [2] Enabling UART peripheral clock...");
-    // Enable UART1 peripheral clock
-    periph_module_enable(PERIPH_UART1_MODULE);
-    Serial.println("  [2] UART clock enabled OK");
+    Serial.println("  [2] Enabling UART peripheral module...");
+    Serial.flush();
+    periph_module_enable(RS485_PERIPH_MODULE);
 
-    Serial.println("  [3] Configuring UART pins...");
-    // Configure TX pin
-    gpio_set_direction((gpio_num_t)RS485_TX_PIN, GPIO_MODE_OUTPUT);
-    esp_rom_gpio_connect_out_signal(RS485_TX_PIN, UART_PERIPH_SIGNAL(1, SOC_UART_TX_PIN_IDX), false, false);
+    Serial.println("  [3] Configuring UART parameters...");
+    Serial.flush();
+    uart_config_t uart_config = {
+        .baud_rate = RS485_BAUD_RATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .rx_flow_ctrl_thresh = 0,
+        .source_clk = UART_SCLK_DEFAULT
+    };
+    ESP_ERROR_CHECK(uart_param_config((uart_port_t)RS485_UART_NUM, &uart_config));
 
-    // Configure RX pin
-    gpio_set_direction((gpio_num_t)RS485_RX_PIN, GPIO_MODE_INPUT);
+    Serial.println("  [4] Setting UART pins...");
+    Serial.flush();
+    ESP_ERROR_CHECK(uart_set_pin((uart_port_t)RS485_UART_NUM, RS485_TX_PIN, RS485_RX_PIN,
+                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+
+    // Ensure RX pin has pullup for stable idle state
     gpio_set_pull_mode((gpio_num_t)RS485_RX_PIN, GPIO_PULLUP_ONLY);
-    esp_rom_gpio_connect_in_signal(RS485_RX_PIN, UART_PERIPH_SIGNAL(1, SOC_UART_RX_PIN_IDX), false);
-    Serial.println("  [3] UART pins configured OK");
-
-    Serial.println("  [4] Configuring UART parameters...");
-    // Reset UART via peripheral module (ESP-IDF v5.x way)
-    periph_module_reset(PERIPH_UART1_MODULE);
-
-    // Set clock source and baud rate
-    // ESP-IDF v5.x uses soc_module_clk_t, not uart_sclk_t
-    // Use APB clock which is 80MHz on ESP32-S3
-    uart_ll_set_sclk(uartHw, (soc_module_clk_t)UART_SCLK_DEFAULT);
-    uint32_t sclk_freq = 80000000;  // APB clock frequency
-    uart_ll_set_baudrate(uartHw, RS485_BAUD_RATE, sclk_freq);
-
-    // Configure frame format: 8N1
-    uart_ll_set_data_bit_num(uartHw, UART_DATA_8_BITS);
-    uart_ll_set_parity(uartHw, UART_PARITY_DISABLE);
-    uart_ll_set_stop_bits(uartHw, UART_STOP_BITS_1);
-
-    // Disable hardware flow control
-    uart_ll_set_hw_flow_ctrl(uartHw, UART_HW_FLOWCTRL_DISABLE, 0);
-
-    // Enable TX and RX
-    uart_ll_set_tx_idle_num(uartHw, 0);
-    uart_ll_tx_break(uartHw, 0);
-    Serial.println("  [4] UART parameters configured OK");
+    Serial.println("  [4] UART pins configured OK");
 
     Serial.println("  [5] Configuring RX FIFO threshold...");
-    // Configure RX FIFO threshold - trigger on every byte for lowest latency
+    // Trigger interrupt on every byte for lowest latency
     uart_ll_set_rxfifo_full_thr(uartHw, 1);
     Serial.println("  [5] RX FIFO threshold set OK");
 
     Serial.println("  [6] Clearing and enabling interrupts...");
-    // Clear any pending interrupts
     uart_ll_clr_intsts_mask(uartHw, UART_LL_INTR_MASK);
-
-    // Enable RX FIFO full interrupt
     uart_ll_ena_intr_mask(uartHw, UART_INTR_RXFIFO_FULL);
     Serial.println("  [6] Interrupts configured OK");
 
     Serial.println("  [7] Registering ISR...");
-    // Register our ISR directly (no driver to conflict with)
     ESP_ERROR_CHECK(esp_intr_alloc(uart_periph_signal[RS485_UART_NUM].irq,
                                     ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL1,
                                     uart_isr_handler, NULL, &uartIntrHandle));
@@ -893,16 +957,284 @@ static void initRS485Hardware() {
     rs485State = STATE_SYNC;
     lastRxTime = esp_timer_get_time();
 
-    Serial.println("  [8] RS485 initialization complete!");
+    Serial.println("  RS485 ISR mode initialization complete!");
     udpDbgSend("RS485 ISR mode initialized, DE pin=%d", RS485_DE_PIN);
 }
 
+// ############################################################################
+//
+//    DRIVER MODE IMPLEMENTATION (fallback)
+//
+// ############################################################################
+
+#else // !USE_ISR_MODE
+
 // ============================================================================
-// PROCESS EXPORT DATA (called from main loop)
+// DE PIN CONTROL (driver mode - non-ISR)
+// ============================================================================
+
+#if RS485_DE_PIN >= 0
+static inline void setDE(bool high) {
+    gpio_set_level((gpio_num_t)RS485_DE_PIN, high ? 1 : 0);
+}
+#else
+#define setDE(x)
+#endif
+
+// ============================================================================
+// TX FUNCTIONS - Send response using ESP-IDF UART driver
+// ============================================================================
+
+static void sendResponse() {
+    uint8_t len = messageBuffer.getLengthISR();
+
+    // Build response packet
+    uint8_t txBuf[MESSAGE_BUFFER_SIZE + 4];
+    uint8_t txLen = 0;
+
+    txBuf[txLen++] = len;        // Length byte
+    txBuf[txLen++] = 0;          // MsgType = 0
+
+    for (uint8_t i = 0; i < len; i++) {
+        txBuf[txLen++] = messageBuffer.getISR();
+    }
+
+    txBuf[txLen++] = 0x72;       // Checksum
+
+    // Enable DE for transmission
+#if RS485_DE_PIN >= 0
+    setDE(true);
+    ets_delay_us(TX_WARMUP_DELAY_MANUAL_US);
+#else
+    ets_delay_us(TX_WARMUP_DELAY_AUTO_US);
+#endif
+
+    // Send via driver
+    uart_write_bytes((uart_port_t)RS485_UART_NUM, (const char*)txBuf, txLen);
+    uart_wait_tx_done((uart_port_t)RS485_UART_NUM, pdMS_TO_TICKS(10));
+
+    // Release DE
+    setDE(false);
+
+    // Flush any echo bytes from RX buffer
+    uart_flush_input((uart_port_t)RS485_UART_NUM);
+
+    // Clear message buffer
+    messageBuffer.clearISR();
+
+    rs485State = STATE_RX_WAIT_ADDRESS;
+}
+
+static void sendZeroLengthResponse() {
+    uint8_t zero = 0;
+
+    // Enable DE for transmission
+#if RS485_DE_PIN >= 0
+    setDE(true);
+    ets_delay_us(TX_WARMUP_DELAY_MANUAL_US);
+#else
+    ets_delay_us(TX_WARMUP_DELAY_AUTO_US);
+#endif
+
+    // Send single zero byte
+    uart_write_bytes((uart_port_t)RS485_UART_NUM, (const char*)&zero, 1);
+    uart_wait_tx_done((uart_port_t)RS485_UART_NUM, pdMS_TO_TICKS(10));
+
+    // Release DE
+    setDE(false);
+
+    // Flush any echo bytes
+    uart_flush_input((uart_port_t)RS485_UART_NUM);
+
+    rs485State = STATE_RX_WAIT_ADDRESS;
+}
+
+// ============================================================================
+// RS485 RX BYTE PROCESSOR - called from main loop (driver mode)
+// ============================================================================
+
+static void processRxByte(uint8_t c) {
+    int64_t now = esp_timer_get_time();
+    rxByteCount++;
+
+    // Sync detection - if gap > 500µs, reset to wait for address
+    if (rs485State == STATE_SYNC) {
+        if ((now - lastRxTime) >= SYNC_TIMEOUT_US) {
+            rs485State = STATE_RX_WAIT_ADDRESS;
+            // Fall through to process this byte as address
+        } else {
+            lastRxTime = now;
+            return;  // Stay in sync, discard byte
+        }
+    }
+
+    switch (rs485State) {
+        case STATE_RX_WAIT_ADDRESS:
+            rxSlaveAddress = c;
+            rs485State = STATE_RX_WAIT_MSGTYPE;
+            break;
+
+        case STATE_RX_WAIT_MSGTYPE:
+            rxMsgType = c;
+            rs485State = STATE_RX_WAIT_DATALENGTH;
+            break;
+
+        case STATE_RX_WAIT_DATALENGTH:
+            rxtxLen = c;
+
+            if (rxtxLen == 0) {
+                if (rxSlaveAddress == 0) {
+                    rs485State = STATE_RX_WAIT_ADDRESS;
+                } else if (rxSlaveAddress == SLAVE_ADDRESS) {
+                    // Poll for us - respond!
+                    if (rxMsgType == 0) {
+                        if (messageBuffer.isCompleteISR()) {
+                            sendResponse();
+                        } else {
+                            sendZeroLengthResponse();
+                        }
+                    } else {
+                        rs485State = STATE_SYNC;
+                    }
+                } else {
+                    rs485State = STATE_RX_WAIT_ANSWER_DATALENGTH;
+                }
+            } else {
+                if (rxSlaveAddress == 0 && rxMsgType == 0) {
+                    rxDataType = RXDATA_DCSBIOS_EXPORT;
+                } else {
+                    rxDataType = RXDATA_IGNORE;
+                }
+                rs485State = STATE_RX_WAIT_DATA;
+            }
+            break;
+
+        case STATE_RX_WAIT_DATA:
+            rxtxLen--;
+            if (rxDataType == RXDATA_DCSBIOS_EXPORT) {
+                uint8_t nextPos = (exportWritePos + 1) % EXPORT_BUFFER_SIZE;
+                if (nextPos != exportReadPos) {
+                    exportBuffer[exportWritePos] = c;
+                    exportWritePos = nextPos;
+                }
+            }
+            if (rxtxLen == 0) {
+                rs485State = STATE_RX_WAIT_CHECKSUM;
+            }
+            break;
+
+        case STATE_RX_WAIT_CHECKSUM:
+            if (rxSlaveAddress == 0) {
+                rs485State = STATE_RX_WAIT_ADDRESS;
+            } else if (rxSlaveAddress == SLAVE_ADDRESS) {
+                if (rxMsgType == 0) {
+                    if (messageBuffer.isCompleteISR()) {
+                        sendResponse();
+                    } else {
+                        sendZeroLengthResponse();
+                    }
+                } else {
+                    rs485State = STATE_SYNC;
+                }
+            } else {
+                rs485State = STATE_RX_WAIT_ANSWER_DATALENGTH;
+            }
+            break;
+
+        case STATE_RX_WAIT_ANSWER_DATALENGTH:
+            rxtxLen = c;
+            if (rxtxLen == 0) {
+                rs485State = STATE_RX_WAIT_ADDRESS;
+            } else {
+                rs485State = STATE_RX_WAIT_ANSWER_MSGTYPE;
+            }
+            break;
+
+        case STATE_RX_WAIT_ANSWER_MSGTYPE:
+            rs485State = STATE_RX_WAIT_ANSWER_DATA;
+            break;
+
+        case STATE_RX_WAIT_ANSWER_DATA:
+            rxtxLen--;
+            if (rxtxLen == 0) {
+                rs485State = STATE_RX_WAIT_ANSWER_CHECKSUM;
+            }
+            break;
+
+        case STATE_RX_WAIT_ANSWER_CHECKSUM:
+            rs485State = STATE_RX_WAIT_ADDRESS;
+            break;
+
+        default:
+            rs485State = STATE_SYNC;
+            break;
+    }
+
+    lastRxTime = now;
+}
+
+// ============================================================================
+// DRIVER MODE - HARDWARE INITIALIZATION
+// ============================================================================
+
+static void initRS485Hardware() {
+    Serial.println("  [1] Configuring DE GPIO pin...");
+#if RS485_DE_PIN >= 0
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << RS485_DE_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io_conf);
+    setDE(false);  // Start in RX mode
+    Serial.println("  [1] DE GPIO configured OK");
+#else
+    Serial.println("  [1] No DE pin (auto-direction)");
+#endif
+
+    // =========================================================================
+    // ESP-IDF UART DRIVER SETUP - Portable across ALL ESP32 variants
+    // =========================================================================
+
+    Serial.println("  [2] Installing UART driver...");
+
+    uart_config_t uart_config = {
+        .baud_rate = RS485_BAUD_RATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .rx_flow_ctrl_thresh = 0,
+        .source_clk = UART_SCLK_DEFAULT
+    };
+
+    // Install driver with RX buffer (256) and TX buffer (256)
+    ESP_ERROR_CHECK(uart_driver_install((uart_port_t)RS485_UART_NUM, 256, 256, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_param_config((uart_port_t)RS485_UART_NUM, &uart_config));
+    ESP_ERROR_CHECK(uart_set_pin((uart_port_t)RS485_UART_NUM, RS485_TX_PIN, RS485_RX_PIN,
+                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+
+    // Flush any stale data
+    uart_flush_input((uart_port_t)RS485_UART_NUM);
+
+    Serial.println("  [2] UART driver installed OK");
+
+    rs485State = STATE_SYNC;
+    lastRxTime = esp_timer_get_time();
+
+    Serial.println("  RS485 driver mode initialization complete!");
+    udpDbgSend("RS485 driver mode, DE pin=%d", RS485_DE_PIN);
+}
+
+#endif // USE_ISR_MODE
+
+// ============================================================================
+// PROCESS EXPORT DATA (called from main loop - both modes)
 // ============================================================================
 
 static void processExportData() {
-    // Process bytes queued by ISR
     while (exportReadPos != exportWritePos) {
         uint8_t c = exportBuffer[exportReadPos];
         exportReadPos = (exportReadPos + 1) % EXPORT_BUFFER_SIZE;
@@ -985,9 +1317,9 @@ public:
 // TEST PINS
 // ============================================================================
 
-#define SWITCH_PIN      16
-#define BUTTON_PIN      0
-#define MC_READY_PIN    15
+#define SWITCH_PIN       2
+#define BUTTON_PIN       0
+#define MC_READY_PIN     1
 
 #if SWITCH_PIN >= 0
 Switch2Pos masterArmSw("MASTER_ARM_SW", SWITCH_PIN);
@@ -1006,16 +1338,37 @@ LED mcReadyLed(0x740C, 0x8000, MC_READY_PIN);
 // ============================================================================
 
 void setup() {
-    // Initialize Serial for debug output
     Serial.begin(115200);
-    delay(1000);  // Give serial time to connect
+    delay(3000);
     Serial.println();
     Serial.println("===========================================");
-    Serial.println("ESP32-S3 RS485 Slave - ISR Mode Starting...");
+    Serial.printf("ESP32 RS485 Slave - %s\n", USE_ISR_MODE ? "ISR Mode" : "Driver Mode");
+    Serial.printf("Chip Model: %s Rev %d\n", ESP.getChipModel(), ESP.getChipRevision());
+    Serial.printf("CPU Freq: %d MHz, Flash: %d MB\n", ESP.getCpuFreqMHz(), ESP.getFlashChipSize() / 1024 / 1024);
+    Serial.printf("Max valid GPIO: %d\n", SOC_GPIO_PIN_COUNT - 1);
     Serial.printf("Slave Address: %d\n", SLAVE_ADDRESS);
     Serial.printf("Baud Rate: %d\n", RS485_BAUD_RATE);
     Serial.printf("TX Pin: %d, RX Pin: %d, DE Pin: %d\n", RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN);
+    Serial.printf("Switch Pin: %d, MC Ready LED Pin: %d\n", SWITCH_PIN, MC_READY_PIN);
     Serial.println("===========================================");
+
+    // Validate pin numbers for this chip
+    #if SWITCH_PIN >= 0
+    if (SWITCH_PIN >= SOC_GPIO_PIN_COUNT) {
+        Serial.printf("*** WARNING: SWITCH_PIN %d is INVALID for this chip (max=%d)! ***\n",
+                      SWITCH_PIN, SOC_GPIO_PIN_COUNT - 1);
+    }
+    #endif
+    #if MC_READY_PIN >= 0
+    if (MC_READY_PIN >= SOC_GPIO_PIN_COUNT) {
+        Serial.printf("*** WARNING: MC_READY_PIN %d is INVALID for this chip (max=%d)! ***\n",
+                      MC_READY_PIN, SOC_GPIO_PIN_COUNT - 1);
+    }
+    #endif
+    if (RS485_TX_PIN >= SOC_GPIO_PIN_COUNT || RS485_RX_PIN >= SOC_GPIO_PIN_COUNT) {
+        Serial.printf("*** WARNING: UART pins may be INVALID for this chip (max=%d)! ***\n",
+                      SOC_GPIO_PIN_COUNT - 1);
+    }
 
     udpDbgInit();
 
@@ -1031,7 +1384,18 @@ static unsigned long loopCount = 0;
 void loop() {
     udpDbgCheck();
 
-    // Process export data queued by ISR (for LED updates etc)
+#if !USE_ISR_MODE
+    // Driver mode: read bytes from UART driver and process through state machine
+    {
+        uint8_t rxBuf[64];
+        int len = uart_read_bytes((uart_port_t)RS485_UART_NUM, rxBuf, sizeof(rxBuf), 0);
+        for (int i = 0; i < len; i++) {
+            processRxByte(rxBuf[i]);
+        }
+    }
+#endif
+
+    // Process export data queued by ISR/state machine (for LED updates etc)
     processExportData();
 
     // Poll inputs (switches, buttons)
@@ -1044,9 +1408,10 @@ void loop() {
     loopCount++;
     if (millis() - lastHeartbeat >= 5000) {
         lastHeartbeat = millis();
-        Serial.printf("[ALIVE] loops=%lu, state=%d, exportBuf=%d/%d\n",
-                      loopCount, (int)rs485State,
+        Serial.printf("[ALIVE] loops=%lu, state=%d, rxBytes=%lu, exportBuf=%d/%d\n",
+                      loopCount, (int)rs485State, rxByteCount,
                       exportReadPos, exportWritePos);
+        udpDbgSend("ALIVE state=%d rxBytes=%lu", (int)rs485State, rxByteCount);
         loopCount = 0;
     }
 }
