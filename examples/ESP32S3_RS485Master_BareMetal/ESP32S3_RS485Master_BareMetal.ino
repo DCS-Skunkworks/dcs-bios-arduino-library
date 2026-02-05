@@ -65,7 +65,7 @@
 // BUS 1 - Primary RS485 bus (enabled by default)
 #define BUS1_TX_PIN     17
 #define BUS1_RX_PIN     18
-#define BUS1_DE_PIN     -1      // -1 = auto-direction mode (board may have built-in auto-dir)
+#define BUS1_DE_PIN     21      // -1 = auto-direction mode (board may have built-in auto-dir)
 #define BUS1_UART_NUM   1       // UART1
 
 // DE Control Mode - Try MANUAL (1) if hardware RS485 mode has issues with your transceiver
@@ -119,12 +119,12 @@
 #define MAX_BROADCAST_CHUNK  64      // Max bytes per broadcast burst
 
 // Slave address range to scan (1-127 valid, 0 is broadcast)
-#define MIN_SLAVE_ADDRESS   1       // First slave address to poll
-#define MAX_SLAVE_ADDRESS   1       // Last slave address to poll (set to 1 for single slave testing)
+#define MIN_SLAVE_ADDRESS     1       // First slave address to poll
+#define MAX_SLAVE_ADDRESS    32       // Last slave address to poll (set to 1 for single slave testing)
 
 // DEBUG: Suppress broadcasts to test if bus congestion is the issue
 // Set to 1 to disable all broadcasts (only polling will occur)
-#define SUPPRESS_BROADCASTS 1       // 0 = normal, 1 = disable broadcasts for testing
+#define SUPPRESS_BROADCASTS 0       // 0 = normal, 1 = disable broadcasts for testing
 
 // Internal array size - don't change
 #define MAX_SLAVES          128
