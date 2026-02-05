@@ -56,6 +56,8 @@
 // These give the transceiver time to switch to TX mode before data is sent
 #define TX_WARMUP_DELAY_MANUAL_US    50    // Manual DE: wait after DE asserted
 #define TX_WARMUP_DELAY_AUTO_US      50    // Auto-direction: wait for RX→TX switch
+#define TX_COOLDOWN_DELAY_US         10    // Post-TX delay before DE deassert (0=disabled)
+                                           // Covers transceiver TX→RX turnaround time
 
 // ============================================================================
 // TX MODE SELECTION (ISR mode only)
@@ -677,6 +679,11 @@ static void IRAM_ATTR sendResponseISR() {
     // Wait for transmission to fully complete
     while (!uart_ll_is_tx_idle(uartHw));
 
+#if TX_COOLDOWN_DELAY_US > 0
+    // Allow transceiver TX→RX turnaround before releasing DE
+    ets_delay_us(TX_COOLDOWN_DELAY_US);
+#endif
+
     // Disable driver
     setDE_ISR(false);
 
@@ -707,6 +714,11 @@ static void IRAM_ATTR sendZeroLengthResponseISR() {
 
     // Wait for transmission to complete
     while (!uart_ll_is_tx_idle(uartHw));
+
+#if TX_COOLDOWN_DELAY_US > 0
+    // Allow transceiver TX→RX turnaround before releasing DE
+    ets_delay_us(TX_COOLDOWN_DELAY_US);
+#endif
 
     // Disable driver
     setDE_ISR(false);
