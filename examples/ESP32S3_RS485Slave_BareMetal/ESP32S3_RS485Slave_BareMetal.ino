@@ -676,8 +676,10 @@ static void IRAM_ATTR uart_isr_handler(void *arg) {
     uint32_t uart_intr_status = uart_ll_get_intsts_mask(uartHw);
     isrTriggerCount++;  // DEBUG: count ISR invocations
 
-    // Process all available bytes
-    while (uart_ll_get_rxfifo_len(uartHw) > 0) {
+    // Process available bytes (limit to 64 per call to prevent infinite loop when polled)
+    int bytesProcessed = 0;
+    while (uart_ll_get_rxfifo_len(uartHw) > 0 && bytesProcessed < 64) {
+        bytesProcessed++;
         uint8_t c;
         uart_ll_read_rxfifo(uartHw, &c, 1);
         isrByteCount++;  // DEBUG: count bytes
