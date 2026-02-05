@@ -19,9 +19,9 @@
  
  namespace DcsBios {
 	//EndOfUpdateDetector eouDetector;
-	
+
 	MasterPCConnection uart0(&UDR0, &UCSR0A, &UCSR0B, &UCSR0C);
-	
+
 	RS485Master::RS485Master(volatile uint8_t *udr, volatile uint8_t *ucsra, volatile uint8_t *ucsrb, volatile uint8_t *ucsrc, uint8_t txen_pin) :
 	udr(udr), ucsra(ucsra), ucsrb(ucsrb), ucsrc(ucsrc) {
 		// build a circular, singly-linked list of all RS485Master instances
@@ -89,7 +89,7 @@
 			}
 		}
 		
-		// timeout for non-existing devices
+		// timeout for non-existing devices (1ms to receive first byte)
 		if (state == RX_WAIT_DATALENGTH && ((micros() - rx_start_time) > 1000)) {
 			slave_present[poll_address] = false;
 			noInterrupts(); s8();
@@ -100,6 +100,7 @@
 		
 		if ((state == RX_WAIT_MSGTYPE || state == RX_WAIT_DATA || state == RX_WAIT_CHECKSUM)
 		&& ((micros() - rx_start_time) > 5000)) {
+			// 5ms timeout - restore original behavior exactly
 			messageBuffer.clear();
 			messageBuffer.put('\n');
 			noInterrupts(); s8();
@@ -251,8 +252,8 @@
 		volatile unsigned long _tx_start_time = tx_start_time;
 		c8(); interrupts();
 		if (pc_tx_buffer && (micros() - _tx_start_time > 5000)) {
+			// PC TX timeout - silently clear and move on
 			pc_tx_buffer->clear();
-			pc_tx_buffer->put('\n');
 			pc_tx_buffer->complete = true;
 			set_udrie();
 		}
