@@ -65,11 +65,11 @@
 // BUS 1 - Primary RS485 bus (enabled by default)
 #define BUS1_TX_PIN     17
 #define BUS1_RX_PIN     18
-#define BUS1_DE_PIN     21      // -1 = auto-direction mode (board may have built-in auto-dir)
-#define BUS1_UART_NUM   1       // UART1
+#define BUS1_DE_PIN     -1      // -1 = auto-direction mode (board may have built-in auto-dir)
+#define BUS1_UART_NUM    1       // UART1
 
 // DE Control Mode - Try MANUAL (1) if hardware RS485 mode has issues with your transceiver
-#define RS485_DE_MANUAL 1       // 0 = Hardware RS485 mode, 1 = Manual GPIO mode
+#define RS485_DE_MANUAL  0       // 0 = Hardware RS485 mode, 1 = Manual GPIO mode
 
 // BUS 2 - Secondary RS485 bus (disabled by default)
 #define BUS2_TX_PIN     -1      // Set to valid GPIO to enable
@@ -766,7 +766,7 @@ static void sendToPC() {
 void setup() {
     // Initialize USB CDC for PC communication
     PC_SERIAL.begin(250000);
-    delay(100);
+    delay(3000);
 
 #if UDP_DEBUG_ENABLE
     // Initialize WiFi for UDP debug (non-blocking)

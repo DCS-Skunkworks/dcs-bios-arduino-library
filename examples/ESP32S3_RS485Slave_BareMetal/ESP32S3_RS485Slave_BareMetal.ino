@@ -20,12 +20,12 @@
  * Both modes work on: ESP32, S2, S3, C3, C6, H2
  */
 
-#define SLAVE_ADDRESS 1
+#define SLAVE_ADDRESS 2
 
 // Pin Configuration
 #define RS485_TX_PIN    17    // Yellow Cable 
 #define RS485_RX_PIN    18    // White Cable
-#define RS485_DE_PIN    21    // Set to -1 for auto-direction transceivers
+#define RS485_DE_PIN    -1    // Set to -1 for auto-direction transceivers
 
 // UART Configuration
 #define RS485_UART_NUM  1
@@ -1317,9 +1317,9 @@ public:
 // TEST PINS
 // ============================================================================
 
-#define SWITCH_PIN       1 // Yellow
+#define SWITCH_PIN       16 // Yellow
 #define BUTTON_PIN       0
-#define MC_READY_PIN     2 // Orange
+#define MC_READY_PIN     15 // Orange
 
 #if SWITCH_PIN >= 0
 Switch2Pos masterArmSw("MASTER_ARM_SW", SWITCH_PIN);
