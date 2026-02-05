@@ -560,15 +560,16 @@ static inline void IRAM_ATTR txByteWaitIdle(uint8_t b) {
     while (!uart_ll_is_tx_idle(uartHw));  // Wait for byte to fully transmit
 }
 
-// Warm up UART and enable DE for transmission (manual DE control only)
+// Warm up UART and enable DE for transmission
 static inline void IRAM_ATTR prepareForTransmit() {
 #if RS485_DE_PIN >= 0
-    // Manual DE control: enable driver and wait for transceiver to stabilize
+    // Manual DE control: enable driver
     setDE_ISR(true);
-    // ~50µs delay at 240MHz - matches AVR's one-byte warm-up time
-    for (volatile int i = 0; i < 3000; i++) { __asm__ __volatile__("nop"); }
 #endif
-    // Auto-direction transceivers: no delay needed, they switch automatically
+    // Delay for transceiver to switch to TX mode (~50µs at 240MHz)
+    // - Manual DE: wait for driver to stabilize after DE asserted
+    // - Auto-direction: wait for transceiver to detect TX and switch
+    for (volatile int i = 0; i < 3000; i++) { __asm__ __volatile__("nop"); }
 }
 
 static void IRAM_ATTR sendResponseISR() {
