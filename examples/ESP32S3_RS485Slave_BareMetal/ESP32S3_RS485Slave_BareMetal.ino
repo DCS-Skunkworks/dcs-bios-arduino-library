@@ -37,10 +37,10 @@
 // ============================================================================
 #define SYNC_TIMEOUT_US      500    // 500µs silence = sync detected
 
-// TX Warm-up delays (in NOP loop iterations, ~50µs = 3000 at 240MHz)
+// TX Warm-up delays in MICROSECONDS (portable across all ESP32 variants)
 // These give the transceiver time to switch to TX mode before data is sent
-#define TX_WARMUP_DELAY_MANUAL    3000    // Manual DE: wait after DE asserted
-#define TX_WARMUP_DELAY_AUTO      3000    // Auto-direction: wait for RX→TX switch
+#define TX_WARMUP_DELAY_MANUAL_US    50    // Manual DE: wait after DE asserted
+#define TX_WARMUP_DELAY_AUTO_US      50    // Auto-direction: wait for RX→TX switch
 
 // ============================================================================
 // TX MODE SELECTION
@@ -62,6 +62,7 @@
 #include <driver/gpio.h>
 #include <driver/periph_ctrl.h>
 #include <hal/uart_ll.h>
+#include <rom/ets_sys.h>        // For ets_delay_us() - portable across all ESP32 variants
 #include <hal/gpio_ll.h>
 #include <soc/uart_struct.h>
 #include <soc/gpio_struct.h>
@@ -570,10 +571,10 @@ static inline void IRAM_ATTR prepareForTransmit() {
 #if RS485_DE_PIN >= 0
     // Manual DE control: enable driver, then wait for stabilization
     setDE_ISR(true);
-    for (volatile int i = 0; i < TX_WARMUP_DELAY_MANUAL; i++) { __asm__ __volatile__("nop"); }
+    ets_delay_us(TX_WARMUP_DELAY_MANUAL_US);
 #else
     // Auto-direction: wait for transceiver to detect TX and switch
-    for (volatile int i = 0; i < TX_WARMUP_DELAY_AUTO; i++) { __asm__ __volatile__("nop"); }
+    ets_delay_us(TX_WARMUP_DELAY_AUTO_US);
 #endif
 }
 
