@@ -1080,11 +1080,18 @@ void loop() {
     loopCount++;
     if (millis() - lastHeartbeat >= 5000) {
         lastHeartbeat = millis();
-        Serial.printf("[ALIVE] loops=%lu, state=%d, isrTrig=%lu, isrBytes=%lu, exportBuf=%d/%d\n",
-                      loopCount, (int)rs485State,
-                      isrTriggerCount, isrByteCount,
-                      exportReadPos, exportWritePos);
-        udpDbgSend("ALIVE state=%d isrTrig=%lu isrBytes=%lu", (int)rs485State, isrTriggerCount, isrByteCount);
+
+        // DEBUG: Check UART status directly (bypass ISR)
+        uint32_t fifoLen = uart_ll_get_rxfifo_len(uartHw);
+        uint32_t intRaw = uartHw->int_raw.val;
+        uint32_t intEna = uartHw->int_ena.val;
+        uint32_t intSt = uartHw->int_st.val;
+
+        Serial.printf("[ALIVE] loops=%lu, state=%d, isrTrig=%lu, isrBytes=%lu\n",
+                      loopCount, (int)rs485State, isrTriggerCount, isrByteCount);
+        Serial.printf("        FIFO=%lu, intRaw=0x%04X, intEna=0x%04X, intSt=0x%04X\n",
+                      fifoLen, intRaw, intEna, intSt);
+        udpDbgSend("ALIVE isrTrig=%lu FIFO=%lu intRaw=0x%X intEna=0x%X", isrTriggerCount, fifoLen, intRaw, intEna);
         loopCount = 0;
     }
 }
