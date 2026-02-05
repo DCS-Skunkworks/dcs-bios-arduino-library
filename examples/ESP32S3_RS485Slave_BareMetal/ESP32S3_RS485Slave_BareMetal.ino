@@ -679,7 +679,7 @@ static void IRAM_ATTR sendResponseISR() {
     // Wait for transmission to fully complete
     while (!uart_ll_is_tx_idle(uartHw));
 
-#if TX_COOLDOWN_DELAY_US > 0
+#if RS485_DE_PIN >= 0 && TX_COOLDOWN_DELAY_US > 0
     // Allow transceiver TX→RX turnaround before releasing DE
     ets_delay_us(TX_COOLDOWN_DELAY_US);
 #endif
@@ -715,7 +715,7 @@ static void IRAM_ATTR sendZeroLengthResponseISR() {
     // Wait for transmission to complete
     while (!uart_ll_is_tx_idle(uartHw));
 
-#if TX_COOLDOWN_DELAY_US > 0
+#if RS485_DE_PIN >= 0 && TX_COOLDOWN_DELAY_US > 0
     // Allow transceiver TX→RX turnaround before releasing DE
     ets_delay_us(TX_COOLDOWN_DELAY_US);
 #endif
