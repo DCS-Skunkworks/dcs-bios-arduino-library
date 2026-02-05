@@ -20,7 +20,7 @@
  * Both modes work on: ESP32, S2, S3, C3, C6, H2
  */
 
-#define SLAVE_ADDRESS 2
+#define SLAVE_ADDRESS 1
 
 // Pin Configuration
 #define RS485_TX_PIN    17    // Yellow Cable 
@@ -70,7 +70,7 @@
 // ============================================================================
 // DEBUG OPTIONS
 // ============================================================================
-#define UDP_DEBUG_ENABLE    1
+#define UDP_DEBUG_ENABLE    0
 #define WIFI_SSID           "TestNetwork"
 #define WIFI_PASSWORD       "TestingOnly"
 
@@ -1382,6 +1382,16 @@ static unsigned long lastHeartbeat = 0;
 static unsigned long loopCount = 0;
 
 void loop() {
+
+{
+    static int lastDbg = -1;
+    int s = digitalRead(39);
+    if (s != lastDbg) {
+        Serial.printf("SW39=%d\n", s);
+        lastDbg = s;
+    }
+}
+
     udpDbgCheck();
 
 #if !USE_ISR_MODE

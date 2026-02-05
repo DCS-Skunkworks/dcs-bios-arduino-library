@@ -120,7 +120,7 @@
 
 // Slave address range to scan (1-127 valid, 0 is broadcast)
 #define MIN_SLAVE_ADDRESS     1       // First slave address to poll
-#define MAX_SLAVE_ADDRESS    32       // Last slave address to poll (set to 1 for single slave testing)
+#define MAX_SLAVE_ADDRESS     1       // Last slave address to poll (set to 1 for single slave testing)
 
 // DEBUG: Suppress broadcasts to test if bus congestion is the issue
 // Set to 1 to disable all broadcasts (only polling will occur)
