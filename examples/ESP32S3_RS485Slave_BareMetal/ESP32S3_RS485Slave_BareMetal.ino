@@ -1317,9 +1317,9 @@ public:
 // TEST PINS
 // ============================================================================
 
-#define SWITCH_PIN       16 // Yellow
+#define SWITCH_PIN       39 // Yellow
 #define BUTTON_PIN       0
-#define MC_READY_PIN     15 // Orange
+#define MC_READY_PIN     40 // Orange
 
 #if SWITCH_PIN >= 0
 Switch2Pos masterArmSw("MASTER_ARM_SW", SWITCH_PIN);
