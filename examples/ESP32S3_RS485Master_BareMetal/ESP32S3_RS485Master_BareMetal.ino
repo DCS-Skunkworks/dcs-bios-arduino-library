@@ -3,7 +3,7 @@
  * ESP32 RS485 MASTER - BARE METAL MULTI-BUS IMPLEMENTATION
  * =============================================================================
  *
- * Protocol-perfect RS485 Master for DCS-BIOS using ESP32 hardware RS485 mode.
+ * Protocol-perfect RS485 Master for DCS-BIOS using ESP32.
  * Supports up to 3 independent RS485 buses (like AVR DcsBiosNgRS485Master).
  *
  * SUPPORTED ESP32 VARIANTS:
@@ -97,7 +97,7 @@
 
 // Timing Constants (microseconds)
 #define POLL_TIMEOUT_US      1000    // 1ms - timeout waiting for slave response
-#define RX_TIMEOUT_US        20000   // 20ms - timeout for complete message (was 5ms)
+#define RX_TIMEOUT_US        5000    // 5ms - timeout for complete message (matches AVR)
 #define SYNC_TIMEOUT_US      500     // 500µs silence = sync
 #define MAX_POLL_INTERVAL_US 2000    // Ensure we poll at least every 2ms
 
@@ -120,7 +120,7 @@
 
 // Slave address range to scan (1-127 valid, 0 is broadcast)
 #define MIN_SLAVE_ADDRESS     1       // First slave address to poll
-#define MAX_SLAVE_ADDRESS     1       // Last slave address to poll (set to 1 for single slave testing)
+#define MAX_SLAVE_ADDRESS    32       // Last slave address to poll
 
 // DEBUG: Suppress broadcasts to test if bus congestion is the issue
 // Set to 1 to disable all broadcasts (only polling will occur)
@@ -151,10 +151,6 @@
 #include <driver/uart.h>
 #include <driver/gpio.h>
 #include <esp_timer.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <freertos/queue.h>
-#include <freertos/semphr.h>
 
 #if UDP_DEBUG_ENABLE
 #include <WiFi.h>
@@ -183,7 +179,6 @@ public:
     void begin() {
         WiFi.mode(WIFI_STA);
         WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-        // Don't wait for connection - will check later
         targetIP.fromString(UDP_DEBUG_IP);
         connected = false;
     }
@@ -191,11 +186,9 @@ public:
     void checkConnection() {
         if (!connected && WiFi.status() == WL_CONNECTED) {
             connected = true;
-            // Send registration/announcement packet
             send("=== %s ONLINE === IP: %s", UDP_DEBUG_NAME, WiFi.localIP().toString().c_str());
             lastStatusTime = millis();
         }
-        // Periodic heartbeat every 30 seconds to show we're still alive
         if (connected && (millis() - lastStatusTime) > 30000) {
             send("[%s] heartbeat", UDP_DEBUG_NAME);
             lastStatusTime = millis();
@@ -204,16 +197,11 @@ public:
 
     void send(const char* fmt, ...) {
         if (!connected) return;
-
-        // Prefix with device name for easy identification
         int pos = snprintf(buffer, sizeof(buffer), "[%s] ", UDP_DEBUG_NAME);
-
         va_list args;
         va_start(args, fmt);
         vsnprintf(buffer + pos, sizeof(buffer) - pos, fmt, args);
         va_end(args);
-
-        // Non-blocking UDP send
         udp.beginPacket(targetIP, UDP_DEBUG_PORT);
         udp.write((uint8_t*)buffer, strlen(buffer));
         udp.endPacket();
@@ -221,12 +209,10 @@ public:
 
     void sendHex(const char* prefix, uint8_t* data, size_t len) {
         if (!connected) return;
-
         int pos = snprintf(buffer, sizeof(buffer), "[%s] %s: ", UDP_DEBUG_NAME, prefix);
         for (size_t i = 0; i < len && pos < (int)sizeof(buffer) - 4; i++) {
             pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%02X ", data[i]);
         }
-
         udp.beginPacket(targetIP, UDP_DEBUG_PORT);
         udp.write((uint8_t*)buffer, strlen(buffer));
         udp.endPacket();
@@ -240,14 +226,6 @@ UdpDebug udpDbg;
 #define UDP_DBG(fmt, ...)
 #define UDP_DBG_HEX(prefix, data, len)
 #endif
-
-// ============================================================================
-// FREERTOS TX TASK CONFIGURATION
-// ============================================================================
-
-#define TX_TASK_STACK_SIZE  4096
-#define TX_TASK_PRIORITY    5       // Higher than loop() which runs at priority 1
-#define TX_QUEUE_LENGTH     8       // Increased for multi-bus support
 
 // ============================================================================
 // RING BUFFER
@@ -285,32 +263,15 @@ public:
 };
 
 // ============================================================================
-// TX REQUEST STRUCTURE (for FreeRTOS queue)
-// ============================================================================
-
-struct TxRequest {
-    uart_port_t uartNum;                    // Which UART to use
-    uint8_t data[EXPORT_BUFFER_SIZE + 4];   // Packet data
-    uint16_t length;                        // Packet length
-};
-
-// Shared TX task handles
-static TaskHandle_t txTaskHandle = NULL;
-static QueueHandle_t txQueue = NULL;
-
-// ============================================================================
 // RS485 MASTER CLASS - One instance per bus
 // ============================================================================
 
 enum MasterState {
     STATE_IDLE,
-    STATE_TX_SENDING,
-    STATE_POLL_SENDING,
     STATE_RX_WAIT_DATALENGTH,
     STATE_RX_WAIT_MSGTYPE,
     STATE_RX_WAIT_DATA,
-    STATE_RX_WAIT_CHECKSUM,
-    STATE_TIMEOUT_SENDING
+    STATE_RX_WAIT_CHECKSUM
 };
 
 class RS485Master {
@@ -320,12 +281,11 @@ private:
     int txPin, rxPin, dePin;
 
     // State machine
-    volatile MasterState state;
-    volatile int64_t rxStartTime;
-    volatile uint8_t rxtxLen;
-    volatile uint8_t rxMsgType;
-    volatile bool txBusy;
-    volatile int64_t lastPollTime;
+    MasterState state;
+    int64_t rxStartTime;
+    uint8_t rxtxLen;
+    uint8_t rxMsgType;
+    int64_t lastPollTime;
 
     // Slave tracking
     bool slavePresent[MAX_SLAVES];
@@ -345,7 +305,7 @@ public:
     RS485Master(int uartNum, int txPin, int rxPin, int dePin)
         : uartNum((uart_port_t)uartNum), txPin(txPin), rxPin(rxPin), dePin(dePin),
           state(STATE_IDLE), rxStartTime(0), rxtxLen(0), rxMsgType(0),
-          txBusy(false), lastPollTime(0),
+          lastPollTime(0),
           pollAddressCounter(MIN_SLAVE_ADDRESS), scanAddressCounter(MIN_SLAVE_ADDRESS),
           currentPollAddress(MIN_SLAVE_ADDRESS),
           next(nullptr)
@@ -367,9 +327,6 @@ public:
     }
 
     void init() {
-        // Use default clock source (must match Slave!)
-        #define UART_CLK_SOURCE UART_SCLK_DEFAULT
-
         uart_config_t uart_config = {
             .baud_rate = RS485_BAUD_RATE,
             .data_bits = UART_DATA_8_BITS,
@@ -377,7 +334,7 @@ public:
             .stop_bits = UART_STOP_BITS_1,
             .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
             .rx_flow_ctrl_thresh = 0,
-            .source_clk = UART_CLK_SOURCE
+            .source_clk = UART_SCLK_DEFAULT
         };
 
         ESP_ERROR_CHECK(uart_driver_install(uartNum, UART_RX_BUFFER_SIZE,
@@ -404,12 +361,54 @@ public:
         }
 #endif
 
+        // Flush stale data at init ONLY - never during normal operation
         uart_flush_input(uartNum);
         state = STATE_IDLE;
         lastPollTime = esp_timer_get_time();
     }
 
-    int getDePin() const { return dePin; }
+    // ========================================================================
+    // DIRECT TX - Synchronous, inline (no FreeRTOS task overhead)
+    // ========================================================================
+    // Previous implementation used a FreeRTOS queue + task for TX which:
+    //   1. Added 200-500µs non-deterministic context switch latency
+    //   2. Called uart_flush_input() before EVERY send, destroying any
+    //      pending slave response bytes in the RX buffer
+    // This synchronous approach eliminates both problems.
+
+    void sendDirect(const uint8_t* data, uint16_t length) {
+#if RS485_DE_MANUAL
+        if (dePin >= 0) {
+            digitalWrite(dePin, HIGH);  // Enable transmitter
+            delayMicroseconds(50);      // DE warmup
+        }
+#endif
+
+        uart_write_bytes(uartNum, (const char*)data, length);
+        uart_wait_tx_done(uartNum, 50 / portTICK_PERIOD_MS);
+
+#if RS485_DE_MANUAL
+        if (dePin >= 0) {
+            delayMicroseconds(10);      // Ensure last stop bit completes
+            digitalWrite(dePin, LOW);   // Back to RX mode
+
+            // Discard echo bytes (we hear our own TX in manual DE mode)
+            delayMicroseconds(100);
+            uint8_t discardBuf[64];
+            size_t available = 0;
+            uart_get_buffered_data_len(uartNum, &available);
+            size_t toDiscard = (available > length) ? length : available;
+            while (toDiscard > 0) {
+                size_t chunk = (toDiscard > sizeof(discardBuf)) ? sizeof(discardBuf) : toDiscard;
+                uart_read_bytes(uartNum, discardBuf, chunk, 0);
+                toDiscard -= chunk;
+            }
+        }
+#endif
+
+        // Turnaround delay - let transceiver switch back to RX
+        delayMicroseconds(50);
+    }
 
     void advancePollAddress() {
         // Advance through address range, wrapping at MAX_SLAVE_ADDRESS
@@ -444,55 +443,31 @@ public:
 
         uint8_t len = (available > MAX_BROADCAST_CHUNK) ? MAX_BROADCAST_CHUNK : available;
 
-        TxRequest request;
-        request.uartNum = uartNum;
-        request.data[0] = 0x00;
-        request.data[1] = 0x00;
-        request.data[2] = len;
+        uint8_t packet[MAX_BROADCAST_CHUNK + 4];
+        packet[0] = 0x00;
+        packet[1] = 0x00;
+        packet[2] = len;
 
         uint8_t checksum = 0;
         for (uint8_t i = 0; i < len; i++) {
             uint8_t b = exportData.get();
-            request.data[3 + i] = b;
+            packet[3 + i] = b;
             checksum ^= b;
         }
-        request.data[3 + len] = checksum;
-        request.length = 4 + len;
+        packet[3 + len] = checksum;
 
-        txBusy = true;
-        state = STATE_TX_SENDING;
-        xQueueSend(txQueue, &request, 0);
+        sendDirect(packet, 4 + len);
     }
 
     void sendPoll(uint8_t slaveAddr) {
-        TxRequest request;
-        request.uartNum = uartNum;
-        request.data[0] = slaveAddr;
-        request.data[1] = 0x00;
-        request.data[2] = 0x00;
-        request.length = 3;
-
-        txBusy = true;
-        state = STATE_POLL_SENDING;
-        xQueueSend(txQueue, &request, 0);
+        uint8_t packet[3] = { slaveAddr, 0x00, 0x00 };
+        sendDirect(packet, 3);
     }
 
     void sendTimeoutZeroByte() {
-        TxRequest request;
-        request.uartNum = uartNum;
-        request.data[0] = 0x00;
-        request.length = 1;
-
-        txBusy = true;
-        state = STATE_TIMEOUT_SENDING;
-        xQueueSend(txQueue, &request, 0);
+        uint8_t zero = 0x00;
+        sendDirect(&zero, 1);
     }
-
-    void clearTxBusy() {
-        txBusy = false;
-    }
-
-    uart_port_t getUartNum() const { return uartNum; }
 
     void loop() {
         int64_t now = esp_timer_get_time();
@@ -500,7 +475,7 @@ public:
         switch (state) {
             case STATE_IDLE:
 #if !SUPPRESS_BROADCASTS
-                // Only send broadcasts if not suppressed
+                // Send pending broadcast data before polling
                 if (exportData.isNotEmpty() && (now - lastPollTime) < MAX_POLL_INTERVAL_US) {
                     sendBroadcast();
                     return;
@@ -515,34 +490,17 @@ public:
                     advancePollAddress();
                     sendPoll(currentPollAddress);
                     lastPollTime = now;
-                }
-                break;
-
-            case STATE_TX_SENDING:
-                if (!txBusy) {
-                    state = STATE_IDLE;
-                }
-                break;
-
-            case STATE_POLL_SENDING:
-                if (!txBusy) {
+                    // TX is done synchronously - go straight to waiting for response
                     rxStartTime = esp_timer_get_time();
                     state = STATE_RX_WAIT_DATALENGTH;
-                    // Don't log every poll - too spammy during scanning
-                }
-                break;
-
-            case STATE_TIMEOUT_SENDING:
-                if (!txBusy) {
-                    state = STATE_IDLE;
                 }
                 break;
 
             case STATE_RX_WAIT_DATALENGTH:
                 if ((now - rxStartTime) > POLL_TIMEOUT_US) {
-                    // Don't log normal timeouts - too spammy
                     slavePresent[currentPollAddress] = false;
                     sendTimeoutZeroByte();
+                    state = STATE_IDLE;
                     return;
                 }
                 {
@@ -553,15 +511,12 @@ public:
                         uart_read_bytes(uartNum, &c, 1, 0);
                         rxtxLen = c;
                         slavePresent[currentPollAddress] = true;
-                        // Only log valid-looking responses (len <= 64)
                         if (rxtxLen > 0 && rxtxLen <= 64) {
-                            UDP_DBG("RX_START addr=%d len=%d", currentPollAddress, rxtxLen);
+                            UDP_DBG("RX addr=%d len=%d", currentPollAddress, rxtxLen);
                             state = STATE_RX_WAIT_MSGTYPE;
                             rxStartTime = now;
-                        } else if (rxtxLen > 64) {
-                            // Garbage length - don't spam, just go back to idle
-                            state = STATE_IDLE;
                         } else {
+                            // Zero length or garbage - back to idle
                             state = STATE_IDLE;
                         }
                     }
@@ -570,7 +525,6 @@ public:
 
             case STATE_RX_WAIT_MSGTYPE:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
-                    // Timeout - don't spam debug
                     messageBuffer.clear();
                     state = STATE_IDLE;
                     return;
@@ -589,7 +543,6 @@ public:
 
             case STATE_RX_WAIT_DATA:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
-                    // Timeout - don't spam debug
                     messageBuffer.clear();
                     state = STATE_IDLE;
                     return;
@@ -612,7 +565,6 @@ public:
 
             case STATE_RX_WAIT_CHECKSUM:
                 if ((now - rxStartTime) > RX_TIMEOUT_US) {
-                    // Timeout - don't spam debug
                     messageBuffer.clear();
                     state = STATE_IDLE;
                     return;
@@ -656,70 +608,6 @@ RS485Master bus2(BUS2_UART_NUM, BUS2_TX_PIN, BUS2_RX_PIN, BUS2_DE_PIN);
 #if BUS3_ENABLED
 RS485Master bus3(BUS3_UART_NUM, BUS3_TX_PIN, BUS3_RX_PIN, BUS3_DE_PIN);
 #endif
-
-// ============================================================================
-// FREERTOS TX TASK - Shared by all buses
-// ============================================================================
-
-static void txTask(void* param) {
-    TxRequest request;
-
-    while (true) {
-        if (xQueueReceive(txQueue, &request, portMAX_DELAY) == pdTRUE) {
-            // Find the bus that owns this UART
-            RS485Master* bus = RS485Master::first;
-            while (bus != nullptr) {
-                if (bus->getUartNum() == request.uartNum) {
-                    break;
-                }
-                bus = bus->next;
-            }
-
-            // Flush any stale data from RX buffer BEFORE sending
-            // This clears leftover data from previous cycles
-            uart_flush_input(request.uartNum);
-
-#if RS485_DE_MANUAL
-            // Manual DE control - assert before TX (matches AVR set_txen behavior)
-            if (bus && bus->getDePin() >= 0) {
-                digitalWrite(bus->getDePin(), HIGH);  // Enable transmitter
-            }
-#endif
-
-            // Send on the specified UART
-            uart_write_bytes(request.uartNum, (const char*)request.data, request.length);
-            uart_wait_tx_done(request.uartNum, pdMS_TO_TICKS(50));
-
-#if RS485_DE_MANUAL
-            // Manual DE control - release after TX (matches AVR clear_txen behavior)
-            if (bus && bus->getDePin() >= 0) {
-                delayMicroseconds(10);  // Ensure stop bit completes
-                digitalWrite(bus->getDePin(), LOW);   // Enable receiver
-            }
-
-            // Discard echo bytes - we receive our own TX in manual mode
-            // Wait for echo bytes to arrive, then discard exactly what we sent
-            delayMicroseconds(100);
-            uint8_t discardBuf[32];
-            size_t available = 0;
-            uart_get_buffered_data_len(request.uartNum, &available);
-            // Read and discard up to request.length (our echo) - don't read more!
-            size_t toDiscard = (available > request.length) ? request.length : available;
-            if (toDiscard > 0) {
-                uart_read_bytes(request.uartNum, discardBuf, toDiscard, 0);
-            }
-#endif
-
-            // Small turnaround delay
-            delayMicroseconds(50);
-
-            // Clear txBusy flag
-            if (bus) {
-                bus->clearTxBusy();
-            }
-        }
-    }
-}
 
 // ============================================================================
 // PC COMMUNICATION - Aggregates all buses
@@ -774,29 +662,15 @@ void setup() {
     PC_SERIAL.println("UDP Debug: Connecting to WiFi...");
 #endif
 
-    // Create shared TX queue
-    txQueue = xQueueCreate(TX_QUEUE_LENGTH, sizeof(TxRequest));
-    if (txQueue == NULL) {
-        PC_SERIAL.println("ERROR: Failed to create TX queue!");
-        while (1) { delay(1000); }
-    }
-
-    // Create shared TX task
-    BaseType_t result = xTaskCreatePinnedToCore(
-        txTask, "RS485_TX", TX_TASK_STACK_SIZE, NULL,
-        TX_TASK_PRIORITY, &txTaskHandle, tskNO_AFFINITY
-    );
-    if (result != pdPASS) {
-        PC_SERIAL.println("ERROR: Failed to create TX task!");
-        while (1) { delay(1000); }
-    }
-
     // Initialize all enabled buses
     RS485Master* bus = RS485Master::first;
     while (bus != nullptr) {
         bus->init();
         bus = bus->next;
     }
+
+    PC_SERIAL.println("RS485 Master initialized (inline TX)");
+    UDP_DBG("Master initialized, buses=%d", NUM_BUSES_ENABLED);
 }
 
 void loop() {
@@ -818,60 +692,3 @@ void loop() {
         bus = bus->next;
     }
 }
-
-// ============================================================================
-// TECHNICAL NOTES
-// ============================================================================
-/**
- * MULTI-BUS ARCHITECTURE
- * ======================
- *
- * This implementation mirrors AVR's DcsBiosNgRS485Master multi-UART support:
- *
- * AVR:
- *   RS485Master uart1(&UDR1, ..., UART1_TXENABLE_PIN);
- *   RS485Master uart2(&UDR2, ..., UART2_TXENABLE_PIN);
- *   RS485Master uart3(&UDR3, ..., UART3_TXENABLE_PIN);
- *
- * ESP32:
- *   RS485Master bus1(UART1, TX1, RX1, DE1);
- *   RS485Master bus2(UART2, TX2, RX2, DE2);
- *   RS485Master bus3(UART3, TX3, RX3, DE3);  // If available
- *
- * ZERO OVERHEAD FOR DISABLED BUSES
- * ================================
- *
- * Buses with pins set to -1 are completely compiled out:
- * - No RS485Master instance created
- * - No UART driver installed
- * - No buffers allocated
- * - No processing in loop()
- *
- * Single-bus configuration has IDENTICAL performance to the previous
- * single-bus implementation.
- *
- * DATA FLOW
- * =========
- *
- * PC → Master:
- *   1. PC_SERIAL receives export data
- *   2. processPCInput() copies to ALL buses' exportData buffers
- *   3. Each bus broadcasts independently
- *
- * Slave → PC:
- *   1. Each bus polls its slaves independently
- *   2. Responses go into each bus's messageBuffer
- *   3. sendToPC() forwards from ANY bus with complete data
- *
- * INDEPENDENT BUS OPERATION
- * =========================
- *
- * Each bus operates completely independently:
- * - Separate slave tracking (slavePresent[])
- * - Separate poll counters
- * - Separate state machines
- * - Can have different slaves on each bus
- *
- * This matches AVR behavior where each UART runs its own RS485 bus
- * with its own set of slaves.
- */
