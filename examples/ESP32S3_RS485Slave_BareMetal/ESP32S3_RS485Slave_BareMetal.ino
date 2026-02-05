@@ -23,9 +23,9 @@
 #define SLAVE_ADDRESS 1
 
 // Pin Configuration
-#define RS485_TX_PIN    19
-#define RS485_RX_PIN    18
-#define RS485_DE_PIN    -1    // Set to -1 for auto-direction transceivers
+#define RS485_TX_PIN    17    // Yellow Cable 
+#define RS485_RX_PIN    18    // White Cable
+#define RS485_DE_PIN    21    // Set to -1 for auto-direction transceivers
 
 // UART Configuration
 #define RS485_UART_NUM  1
@@ -68,7 +68,7 @@
 // ============================================================================
 // DEBUG OPTIONS
 // ============================================================================
-#define UDP_DEBUG_ENABLE    1
+#define UDP_DEBUG_ENABLE    0
 #define WIFI_SSID           "TestNetwork"
 #define WIFI_PASSWORD       "TestingOnly"
 
@@ -1305,9 +1305,9 @@ public:
 // TEST PINS
 // ============================================================================
 
-#define SWITCH_PIN      23
-#define BUTTON_PIN      -1
-#define MC_READY_PIN    22
+#define SWITCH_PIN       2
+#define BUTTON_PIN       0
+#define MC_READY_PIN     1
 
 #if SWITCH_PIN >= 0
 Switch2Pos masterArmSw("MASTER_ARM_SW", SWITCH_PIN);
