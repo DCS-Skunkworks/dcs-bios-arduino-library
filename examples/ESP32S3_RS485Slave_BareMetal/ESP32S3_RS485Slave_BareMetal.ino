@@ -854,57 +854,36 @@ static void initRS485Hardware() {
     Serial.println("  [3] UART pins configured OK");
 
     Serial.println("  [4] Configuring UART parameters...");
-    // Reset UART via peripheral module (ESP-IDF v5.x way)
-    Serial.println("      [4a] Resetting UART peripheral...");
-    Serial.flush();
-    periph_module_reset(PERIPH_UART1_MODULE);
 
-    Serial.println("      [4b] Setting clock source...");
-    Serial.flush();
+    // Use ESP-IDF UART driver for initial configuration (handles chip-specific differences)
+    // Then we'll install our own ISR for bare-metal control
+    uart_config_t uart_config = {
+        .baud_rate = RS485_BAUD_RATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .rx_flow_ctrl_thresh = 0,
+        .source_clk = UART_SCLK_DEFAULT
+    };
 
-    // Set clock source - differs between chip families
-    // All chips can use 80MHz: APB on Xtensa, PLL_F80M on RISC-V
-    uint32_t sclk_freq = 80000000;  // 80MHz for all
-#if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32H2
-    // RISC-V chips: use PLL 80MHz clock (same speed as Xtensa APB)
-    Serial.println("      [4b] RISC-V chip: setting PLL_F80M clock...");
+    Serial.println("      [4a] Installing UART driver...");
     Serial.flush();
-    uart_ll_set_sclk(uartHw, (soc_module_clk_t)3);  // UART_SCLK_PLL_F80M = 3 on C6
-    Serial.println("      [4b] PLL_F80M clock set");
-#else
-    // Xtensa chips: use default (APB) clock source
-    uart_ll_set_sclk(uartHw, (soc_module_clk_t)UART_SCLK_DEFAULT);
-    sclk_freq = getApbFrequency();  // Query actual, usually 80MHz
-    Serial.println("      [4b] Xtensa chip: using APB clock");
-#endif
-    Serial.printf("      [4b] Clock freq: %lu Hz\n", sclk_freq);
-    Serial.flush();
+    ESP_ERROR_CHECK(uart_driver_install((uart_port_t)RS485_UART_NUM, 256, 0, 0, NULL, 0));
 
-    Serial.println("      [4d] Setting baud rate...");
+    Serial.println("      [4b] Configuring UART parameters...");
     Serial.flush();
-    uart_ll_set_baudrate(uartHw, RS485_BAUD_RATE, sclk_freq);
-    Serial.println("      [4e] Baud rate set OK");
-    Serial.flush();
-    Serial.printf("  [4] UART clock: %lu Hz, baud: %d\n", sclk_freq, RS485_BAUD_RATE);
-    Serial.flush();
+    ESP_ERROR_CHECK(uart_param_config((uart_port_t)RS485_UART_NUM, &uart_config));
 
-    // Configure frame format: 8N1
-    Serial.println("      [4f] Setting data bits...");
+    Serial.println("      [4c] Setting UART pins...");
     Serial.flush();
-    uart_ll_set_data_bit_num(uartHw, UART_DATA_8_BITS);
-    Serial.println("      [4g] Setting parity...");
-    Serial.flush();
-    uart_ll_set_parity(uartHw, UART_PARITY_DISABLE);
-    Serial.println("      [4h] Setting stop bits...");
-    Serial.flush();
-    uart_ll_set_stop_bits(uartHw, UART_STOP_BITS_1);
+    ESP_ERROR_CHECK(uart_set_pin((uart_port_t)RS485_UART_NUM, RS485_TX_PIN, RS485_RX_PIN,
+                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
-    // Disable hardware flow control
-    uart_ll_set_hw_flow_ctrl(uartHw, UART_HW_FLOWCTRL_DISABLE, 0);
+    Serial.println("      [4d] Removing UART driver (keeping config)...");
+    Serial.flush();
+    ESP_ERROR_CHECK(uart_driver_delete((uart_port_t)RS485_UART_NUM));
 
-    // Enable TX and RX
-    uart_ll_set_tx_idle_num(uartHw, 0);
-    uart_ll_tx_break(uartHw, 0);
     Serial.println("  [4] UART parameters configured OK");
 
     Serial.println("  [5] Configuring RX FIFO threshold...");
