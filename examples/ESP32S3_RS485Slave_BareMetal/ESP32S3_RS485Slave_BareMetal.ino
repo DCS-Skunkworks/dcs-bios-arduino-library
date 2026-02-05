@@ -953,22 +953,15 @@ private:
         if (state != debounceSteadyState) {
             lastDebounceTime = now;
             debounceSteadyState = state;
-            // DEBUG: Print raw state change
-            Serial.printf("[SWITCH] pin=%d raw change to %d\n", pin, state);
-            udpDbgSend("SWITCH pin=%d change to %d", pin, state);
         }
 
         // Only act if state has been stable for debounce period
         if ((now - lastDebounceTime) >= debounceDelay) {
             if (debounceSteadyState != lastState) {
-                bool sent = tryToSendDcsBiosMessage(msg, state == HIGH ? "0" : "1");
-                if (sent) {
+                if (tryToSendDcsBiosMessage(msg, state == HIGH ? "0" : "1")) {
                     lastState = debounceSteadyState;
-                    Serial.printf("[SWITCH] pin=%d msg='%s' val=%s QUEUED OK\n", pin, msg, state == HIGH ? "0" : "1");
-                    udpDbgSend("SWITCH pin=%d msg=%s val=%s QUEUED", pin, msg, state == HIGH ? "0" : "1");
                 }
-                // If not sent, don't update lastState - will retry next loop
-                // But don't spam debug output - the ALIVE heartbeat shows buffer status
+                // If not sent (buffer busy), will retry next loop
             }
         }
     }
