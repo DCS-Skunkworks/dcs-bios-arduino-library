@@ -15,7 +15,7 @@
 #define SLAVE_ADDRESS 1
 
 // Pin Configuration
-#define RS485_TX_PIN    17
+#define RS485_TX_PIN    19
 #define RS485_RX_PIN    18
 #define RS485_DE_PIN    -1    // Set to -1 for auto-direction transceivers
 
@@ -992,8 +992,8 @@ public:
 // TEST PINS
 // ============================================================================
 
-#define SWITCH_PIN      16
-#define BUTTON_PIN      0
+#define SWITCH_PIN      23
+#define BUTTON_PIN      -1
 #define MC_READY_PIN    15
 
 #if SWITCH_PIN >= 0
