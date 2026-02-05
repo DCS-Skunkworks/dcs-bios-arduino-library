@@ -37,6 +37,11 @@
 // ============================================================================
 #define SYNC_TIMEOUT_US      500    // 500µs silence = sync detected
 
+// TX Warm-up delays (in NOP loop iterations, ~50µs = 3000 at 240MHz)
+// These give the transceiver time to switch to TX mode before data is sent
+#define TX_WARMUP_DELAY_MANUAL    3000    // Manual DE: wait after DE asserted
+#define TX_WARMUP_DELAY_AUTO      3000    // Auto-direction: wait for RX→TX switch
+
 // ============================================================================
 // TX MODE SELECTION
 // ============================================================================
@@ -563,13 +568,13 @@ static inline void IRAM_ATTR txByteWaitIdle(uint8_t b) {
 // Warm up UART and enable DE for transmission
 static inline void IRAM_ATTR prepareForTransmit() {
 #if RS485_DE_PIN >= 0
-    // Manual DE control: enable driver
+    // Manual DE control: enable driver, then wait for stabilization
     setDE_ISR(true);
+    for (volatile int i = 0; i < TX_WARMUP_DELAY_MANUAL; i++) { __asm__ __volatile__("nop"); }
+#else
+    // Auto-direction: wait for transceiver to detect TX and switch
+    for (volatile int i = 0; i < TX_WARMUP_DELAY_AUTO; i++) { __asm__ __volatile__("nop"); }
 #endif
-    // Delay for transceiver to switch to TX mode (~50µs at 240MHz)
-    // - Manual DE: wait for driver to stabilize after DE asserted
-    // - Auto-direction: wait for transceiver to detect TX and switch
-    for (volatile int i = 0; i < 3000; i++) { __asm__ __volatile__("nop"); }
 }
 
 static void IRAM_ATTR sendResponseISR() {
