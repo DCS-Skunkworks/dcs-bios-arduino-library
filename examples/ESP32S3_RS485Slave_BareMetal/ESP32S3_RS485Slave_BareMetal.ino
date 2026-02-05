@@ -872,11 +872,20 @@ static void initRS485Hardware() {
     Serial.println("      [4d] Setting baud rate...");
     Serial.flush();
     uart_ll_set_baudrate(uartHw, RS485_BAUD_RATE, sclk_freq);
+    Serial.println("      [4e] Baud rate set OK");
+    Serial.flush();
     Serial.printf("  [4] UART clock: %lu Hz, baud: %d\n", sclk_freq, RS485_BAUD_RATE);
+    Serial.flush();
 
     // Configure frame format: 8N1
+    Serial.println("      [4f] Setting data bits...");
+    Serial.flush();
     uart_ll_set_data_bit_num(uartHw, UART_DATA_8_BITS);
+    Serial.println("      [4g] Setting parity...");
+    Serial.flush();
     uart_ll_set_parity(uartHw, UART_PARITY_DISABLE);
+    Serial.println("      [4h] Setting stop bits...");
+    Serial.flush();
     uart_ll_set_stop_bits(uartHw, UART_STOP_BITS_1);
 
     // Disable hardware flow control
