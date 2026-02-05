@@ -56,7 +56,7 @@
 // These give the transceiver time to switch to TX mode before data is sent
 #define TX_WARMUP_DELAY_MANUAL_US    50    // Manual DE: wait after DE asserted
 #define TX_WARMUP_DELAY_AUTO_US      50    // Auto-direction: wait for RX→TX switch
-#define TX_COOLDOWN_DELAY_US         10    // Post-TX delay before DE deassert (0=disabled)
+#define TX_COOLDOWN_DELAY_US          1    // Post-TX delay before DE deassert (0=disabled)
                                            // Covers transceiver TX→RX turnaround time
 
 // ============================================================================
