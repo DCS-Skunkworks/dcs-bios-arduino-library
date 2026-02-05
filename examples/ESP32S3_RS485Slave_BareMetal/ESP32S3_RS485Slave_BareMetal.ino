@@ -855,12 +855,22 @@ static void initRS485Hardware() {
 
     Serial.println("  [4] Configuring UART parameters...");
     // Reset UART via peripheral module (ESP-IDF v5.x way)
+    Serial.println("      [4a] Resetting UART peripheral...");
+    Serial.flush();
     periph_module_reset(PERIPH_UART1_MODULE);
 
+    Serial.println("      [4b] Setting clock source...");
+    Serial.flush();
     // Set clock source and baud rate
     // Use APB clock - query actual frequency for portability across all ESP32 variants
     uart_ll_set_sclk(uartHw, (soc_module_clk_t)UART_SCLK_DEFAULT);
+
+    Serial.println("      [4c] Getting APB frequency...");
+    Serial.flush();
     uint32_t sclk_freq = getApbFrequency();  // Portable: works on all ESP32 variants
+
+    Serial.println("      [4d] Setting baud rate...");
+    Serial.flush();
     uart_ll_set_baudrate(uartHw, RS485_BAUD_RATE, sclk_freq);
     Serial.printf("  [4] UART clock: %lu Hz, baud: %d\n", sclk_freq, RS485_BAUD_RATE);
 
