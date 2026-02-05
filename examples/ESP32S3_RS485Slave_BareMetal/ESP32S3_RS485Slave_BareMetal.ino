@@ -17,7 +17,7 @@
 // Pin Configuration (Waveshare ESP32-S3-RS485-CAN)
 #define RS485_TX_PIN    17
 #define RS485_RX_PIN    18
-#define RS485_DE_PIN    21    // Set to -1 for auto-direction transceivers
+#define RS485_DE_PIN    -1    // Set to -1 for auto-direction transceivers
 
 // UART Configuration
 #define RS485_UART_NUM  1
@@ -43,12 +43,12 @@
 // 0 = Buffered mode: Build response in buffer, write all at once to FIFO
 // 1 = Byte-by-byte mode: Write each byte individually, wait for TX idle
 //     (default - mimics AVR behavior, better pacing with FreeRTOS tasks)
-#define TX_MODE_BYTE_BY_BYTE    1
+#define TX_MODE_BYTE_BY_BYTE    0
 
 // ============================================================================
 // DEBUG OPTIONS
 // ============================================================================
-#define UDP_DEBUG_ENABLE    0
+#define UDP_DEBUG_ENABLE    1
 #define WIFI_SSID           "TestNetwork"
 #define WIFI_PASSWORD       "TestingOnly"
 
@@ -985,9 +985,9 @@ public:
 // TEST PINS
 // ============================================================================
 
-#define SWITCH_PIN      2
+#define SWITCH_PIN      16
 #define BUTTON_PIN      0
-#define MC_READY_PIN    1
+#define MC_READY_PIN    15
 
 #if SWITCH_PIN >= 0
 Switch2Pos masterArmSw("MASTER_ARM_SW", SWITCH_PIN);
