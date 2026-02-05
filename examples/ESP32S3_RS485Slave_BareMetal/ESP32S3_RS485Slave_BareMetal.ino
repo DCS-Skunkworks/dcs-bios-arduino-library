@@ -67,6 +67,7 @@
 #include <soc/uart_struct.h>
 #include <soc/gpio_struct.h>
 #include <soc/uart_periph.h>
+#include <soc/soc_caps.h>       // For SOC_GPIO_PIN_COUNT - chip-specific GPIO count
 #include <esp_timer.h>
 #include <esp_intr_alloc.h>
 #include <esp_rom_gpio.h>
@@ -535,6 +536,8 @@ static volatile uint8_t rxMsgType = 0;
 static volatile uint8_t rxtxLen = 0;
 static volatile RxDataType rxDataType = RXDATA_IGNORE;
 static volatile int64_t lastRxTime = 0;
+static volatile uint32_t isrByteCount = 0;      // DEBUG: count bytes received by ISR
+static volatile uint32_t isrTriggerCount = 0;   // DEBUG: count ISR invocations
 
 // Direct hardware pointers for ISR
 static uart_dev_t* const uartHw = &UART1;
@@ -671,11 +674,13 @@ static void IRAM_ATTR sendZeroLengthResponseISR() {
 
 static void IRAM_ATTR uart_isr_handler(void *arg) {
     uint32_t uart_intr_status = uart_ll_get_intsts_mask(uartHw);
+    isrTriggerCount++;  // DEBUG: count ISR invocations
 
     // Process all available bytes
     while (uart_ll_get_rxfifo_len(uartHw) > 0) {
         uint8_t c;
         uart_ll_read_rxfifo(uartHw, &c, 1);
+        isrByteCount++;  // DEBUG: count bytes
 
         int64_t now = esp_timer_get_time();
 
@@ -948,13 +953,21 @@ private:
         if (state != debounceSteadyState) {
             lastDebounceTime = now;
             debounceSteadyState = state;
+            // DEBUG: Print raw state change
+            Serial.printf("[SWITCH] pin=%d raw change to %d\n", pin, state);
+            udpDbgSend("SWITCH pin=%d change to %d", pin, state);
         }
 
         // Only act if state has been stable for debounce period
         if ((now - lastDebounceTime) >= debounceDelay) {
             if (debounceSteadyState != lastState) {
+                Serial.printf("[SWITCH] pin=%d STABLE state=%d, queuing msg '%s'\n", pin, state, msg);
+                udpDbgSend("SWITCH pin=%d STABLE, msg=%s val=%s", pin, msg, state == HIGH ? "0" : "1");
                 if (tryToSendDcsBiosMessage(msg, state == HIGH ? "0" : "1")) {
                     lastState = debounceSteadyState;
+                    Serial.println("[SWITCH] Message queued successfully");
+                } else {
+                    Serial.println("[SWITCH] Message queue FAILED (buffer busy?)");
                 }
             }
         }
@@ -1020,10 +1033,32 @@ void setup() {
     Serial.println();
     Serial.println("===========================================");
     Serial.println("ESP32 RS485 Slave - ISR Mode Starting...");
+    Serial.printf("Chip Model: %s Rev %d\n", ESP.getChipModel(), ESP.getChipRevision());
+    Serial.printf("CPU Freq: %d MHz, Flash: %d MB\n", ESP.getCpuFreqMHz(), ESP.getFlashChipSize() / 1024 / 1024);
+    Serial.printf("Max valid GPIO: %d\n", SOC_GPIO_PIN_COUNT - 1);
     Serial.printf("Slave Address: %d\n", SLAVE_ADDRESS);
     Serial.printf("Baud Rate: %d\n", RS485_BAUD_RATE);
     Serial.printf("TX Pin: %d, RX Pin: %d, DE Pin: %d\n", RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN);
+    Serial.printf("Switch Pin: %d, MC Ready LED Pin: %d\n", SWITCH_PIN, MC_READY_PIN);
     Serial.println("===========================================");
+
+    // Check if configured pins are valid for this chip
+    #if SWITCH_PIN >= 0
+    if (SWITCH_PIN >= SOC_GPIO_PIN_COUNT) {
+        Serial.printf("*** WARNING: SWITCH_PIN %d is INVALID for this chip (max=%d)! ***\n",
+                      SWITCH_PIN, SOC_GPIO_PIN_COUNT - 1);
+    }
+    #endif
+    #if MC_READY_PIN >= 0
+    if (MC_READY_PIN >= SOC_GPIO_PIN_COUNT) {
+        Serial.printf("*** WARNING: MC_READY_PIN %d is INVALID for this chip (max=%d)! ***\n",
+                      MC_READY_PIN, SOC_GPIO_PIN_COUNT - 1);
+    }
+    #endif
+    if (RS485_TX_PIN >= SOC_GPIO_PIN_COUNT || RS485_RX_PIN >= SOC_GPIO_PIN_COUNT) {
+        Serial.printf("*** WARNING: UART pins may be INVALID for this chip (max=%d)! ***\n",
+                      SOC_GPIO_PIN_COUNT - 1);
+    }
 
     udpDbgInit();
 
@@ -1052,9 +1087,11 @@ void loop() {
     loopCount++;
     if (millis() - lastHeartbeat >= 5000) {
         lastHeartbeat = millis();
-        Serial.printf("[ALIVE] loops=%lu, state=%d, exportBuf=%d/%d\n",
+        Serial.printf("[ALIVE] loops=%lu, state=%d, isrTrig=%lu, isrBytes=%lu, exportBuf=%d/%d\n",
                       loopCount, (int)rs485State,
+                      isrTriggerCount, isrByteCount,
                       exportReadPos, exportWritePos);
+        udpDbgSend("ALIVE state=%d isrTrig=%lu isrBytes=%lu", (int)rs485State, isrTriggerCount, isrByteCount);
         loopCount = 0;
     }
 }
