@@ -1067,6 +1067,12 @@ static unsigned long loopCount = 0;
 void loop() {
     udpDbgCheck();
 
+    // WORKAROUND: On ESP32-C6, the UART ISR doesn't fire even though interrupts
+    // are pending. Poll the FIFO and call the handler directly as a fallback.
+    if (uart_ll_get_rxfifo_len(uartHw) > 0) {
+        uart_isr_handler(NULL);  // Call ISR handler directly
+    }
+
     // Process export data queued by ISR (for LED updates etc)
     processExportData();
 
