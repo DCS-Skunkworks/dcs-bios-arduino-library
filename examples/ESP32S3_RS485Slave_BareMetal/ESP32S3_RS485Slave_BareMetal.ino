@@ -863,18 +863,18 @@ static void initRS485Hardware() {
     Serial.flush();
 
     // Set clock source - differs between chip families
-    // Xtensa (ESP32/S2/S3): APB clock (80MHz)
-    // RISC-V (C3/C6/H2): XTAL clock (40MHz) - APB not directly available for UART
-    uint32_t sclk_freq;
+    // All chips can use 80MHz: APB on Xtensa, PLL_F80M on RISC-V
+    uint32_t sclk_freq = 80000000;  // 80MHz for all
 #if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32H2
-    // RISC-V chips: use XTAL clock source
-    uart_ll_set_sclk(uartHw, (soc_module_clk_t)UART_SCLK_XTAL);
-    sclk_freq = 40000000;  // XTAL is 40MHz
-    Serial.println("      [4b] RISC-V chip: using XTAL clock (40MHz)");
+    // RISC-V chips: use PLL 80MHz clock (same speed as Xtensa APB)
+    Serial.println("      [4b] RISC-V chip: setting PLL_F80M clock...");
+    Serial.flush();
+    uart_ll_set_sclk(uartHw, (soc_module_clk_t)3);  // UART_SCLK_PLL_F80M = 3 on C6
+    Serial.println("      [4b] PLL_F80M clock set");
 #else
     // Xtensa chips: use default (APB) clock source
     uart_ll_set_sclk(uartHw, (soc_module_clk_t)UART_SCLK_DEFAULT);
-    sclk_freq = getApbFrequency();  // Typically 80MHz
+    sclk_freq = getApbFrequency();  // Query actual, usually 80MHz
     Serial.println("      [4b] Xtensa chip: using APB clock");
 #endif
     Serial.printf("      [4b] Clock freq: %lu Hz\n", sclk_freq);
