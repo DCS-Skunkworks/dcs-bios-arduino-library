@@ -53,7 +53,7 @@
 // ============================================================================
 // DEBUG OPTIONS
 // ============================================================================
-#define UDP_DEBUG_ENABLE    0
+#define UDP_DEBUG_ENABLE    1
 #define WIFI_SSID           "TestNetwork"
 #define WIFI_PASSWORD       "TestingOnly"
 
@@ -995,7 +995,7 @@ public:
 
 #define SWITCH_PIN      23
 #define BUTTON_PIN      -1
-#define MC_READY_PIN    15
+#define MC_READY_PIN    22
 
 #if SWITCH_PIN >= 0
 Switch2Pos masterArmSw("MASTER_ARM_SW", SWITCH_PIN);
