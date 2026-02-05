@@ -20,7 +20,7 @@
  * Both modes work on: ESP32, S2, S3, C3, C6, H2
  */
 
-#define SLAVE_ADDRESS 2
+#define SLAVE_ADDRESS 1
 
 // Pin Configuration
 #define RS485_TX_PIN    17    // Yellow Cable 
@@ -70,6 +70,7 @@
 // ============================================================================
 // DEBUG OPTIONS
 // ============================================================================
+#define SERIAL_DEBUG_ENABLE 0
 #define UDP_DEBUG_ENABLE    0
 #define WIFI_SSID           "TestNetwork"
 #define WIFI_PASSWORD       "TestingOnly"
@@ -165,6 +166,22 @@ void udpDbgSend(const char* fmt, ...) {
 #define udpDbgInit()
 #define udpDbgCheck()
 #define udpDbgSend(...)
+#endif
+
+// ============================================================================
+// SERIAL DEBUG MACROS
+// ============================================================================
+
+#if SERIAL_DEBUG_ENABLE
+#define dbgBegin(baud)          Serial.begin(baud)
+#define dbgPrint(msg)           Serial.println(msg)
+#define dbgPrintf(fmt, ...)     Serial.printf(fmt, ##__VA_ARGS__)
+#define dbgFlush()              Serial.flush()
+#else
+#define dbgBegin(baud)
+#define dbgPrint(msg)
+#define dbgPrintf(fmt, ...)
+#define dbgFlush()
 #endif
 
 #if SLAVE_ADDRESS < 1 || SLAVE_ADDRESS > 127
@@ -913,7 +930,7 @@ static void IRAM_ATTR uart_isr_handler(void *arg) {
 // ============================================================================
 
 static void initRS485Hardware() {
-    Serial.println("  [1] Configuring DE GPIO pin...");
+    dbgPrint("  [1] Configuring DE GPIO pin...");
 #if RS485_DE_PIN >= 0
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << RS485_DE_PIN),
@@ -924,9 +941,9 @@ static void initRS485Hardware() {
     };
     gpio_config(&io_conf);
     setDE_ISR(false);  // Start in RX mode
-    Serial.println("  [1] DE GPIO configured OK");
+    dbgPrint("  [1] DE GPIO configured OK");
 #else
-    Serial.println("  [1] No DE pin (auto-direction)");
+    dbgPrint("  [1] No DE pin (auto-direction)");
 #endif
 
     // =========================================================================
@@ -936,12 +953,12 @@ static void initRS485Hardware() {
     // prevents ISR registration on ESP32-C6 when using driver install/delete.
     // =========================================================================
 
-    Serial.println("  [2] Enabling UART peripheral module...");
-    Serial.flush();
+    dbgPrint("  [2] Enabling UART peripheral module...");
+    dbgFlush();
     periph_module_enable(RS485_PERIPH_MODULE);
 
-    Serial.println("  [3] Configuring UART parameters...");
-    Serial.flush();
+    dbgPrint("  [3] Configuring UART parameters...");
+    dbgFlush();
     uart_config_t uart_config = {
         .baud_rate = RS485_BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
@@ -953,35 +970,35 @@ static void initRS485Hardware() {
     };
     ESP_ERROR_CHECK(uart_param_config((uart_port_t)RS485_UART_NUM, &uart_config));
 
-    Serial.println("  [4] Setting UART pins...");
-    Serial.flush();
+    dbgPrint("  [4] Setting UART pins...");
+    dbgFlush();
     ESP_ERROR_CHECK(uart_set_pin((uart_port_t)RS485_UART_NUM, RS485_TX_PIN, RS485_RX_PIN,
                                   UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
     // Ensure RX pin has pullup for stable idle state
     gpio_set_pull_mode((gpio_num_t)RS485_RX_PIN, GPIO_PULLUP_ONLY);
-    Serial.println("  [4] UART pins configured OK");
+    dbgPrint("  [4] UART pins configured OK");
 
-    Serial.println("  [5] Configuring RX FIFO threshold...");
+    dbgPrint("  [5] Configuring RX FIFO threshold...");
     // Trigger interrupt on every byte for lowest latency
     uart_ll_set_rxfifo_full_thr(uartHw, 1);
-    Serial.println("  [5] RX FIFO threshold set OK");
+    dbgPrint("  [5] RX FIFO threshold set OK");
 
-    Serial.println("  [6] Clearing and enabling interrupts...");
+    dbgPrint("  [6] Clearing and enabling interrupts...");
     uart_ll_clr_intsts_mask(uartHw, UART_LL_INTR_MASK);
     uart_ll_ena_intr_mask(uartHw, UART_INTR_RXFIFO_FULL);
-    Serial.println("  [6] Interrupts configured OK");
+    dbgPrint("  [6] Interrupts configured OK");
 
-    Serial.println("  [7] Registering ISR...");
+    dbgPrint("  [7] Registering ISR...");
     ESP_ERROR_CHECK(esp_intr_alloc(uart_periph_signal[RS485_UART_NUM].irq,
                                     ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL1,
                                     uart_isr_handler, NULL, &uartIntrHandle));
-    Serial.println("  [7] ISR registered OK");
+    dbgPrint("  [7] ISR registered OK");
 
     rs485State = STATE_SYNC;
     lastRxTime = esp_timer_get_time();
 
-    Serial.println("  RS485 ISR mode initialization complete!");
+    dbgPrint("  RS485 ISR mode initialization complete!");
     udpDbgSend("RS485 ISR mode initialized, DE pin=%d", RS485_DE_PIN);
 }
 
@@ -1204,7 +1221,7 @@ static void processRxByte(uint8_t c) {
 // ============================================================================
 
 static void initRS485Hardware() {
-    Serial.println("  [1] Configuring DE GPIO pin...");
+    dbgPrint("  [1] Configuring DE GPIO pin...");
 #if RS485_DE_PIN >= 0
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << RS485_DE_PIN),
@@ -1215,16 +1232,16 @@ static void initRS485Hardware() {
     };
     gpio_config(&io_conf);
     setDE(false);  // Start in RX mode
-    Serial.println("  [1] DE GPIO configured OK");
+    dbgPrint("  [1] DE GPIO configured OK");
 #else
-    Serial.println("  [1] No DE pin (auto-direction)");
+    dbgPrint("  [1] No DE pin (auto-direction)");
 #endif
 
     // =========================================================================
     // ESP-IDF UART DRIVER SETUP - Portable across ALL ESP32 variants
     // =========================================================================
 
-    Serial.println("  [2] Installing UART driver...");
+    dbgPrint("  [2] Installing UART driver...");
 
     uart_config_t uart_config = {
         .baud_rate = RS485_BAUD_RATE,
@@ -1245,12 +1262,12 @@ static void initRS485Hardware() {
     // Flush any stale data
     uart_flush_input((uart_port_t)RS485_UART_NUM);
 
-    Serial.println("  [2] UART driver installed OK");
+    dbgPrint("  [2] UART driver installed OK");
 
     rs485State = STATE_SYNC;
     lastRxTime = esp_timer_get_time();
 
-    Serial.println("  RS485 driver mode initialization complete!");
+    dbgPrint("  RS485 driver mode initialization complete!");
     udpDbgSend("RS485 driver mode, DE pin=%d", RS485_DE_PIN);
 }
 
@@ -1364,44 +1381,44 @@ LED mcReadyLed(0x740C, 0x8000, MC_READY_PIN);
 // ============================================================================
 
 void setup() {
-    Serial.begin(115200);
+    dbgBegin(115200);
     delay(3000);
-    Serial.println();
-    Serial.println("===========================================");
-    Serial.printf("ESP32 RS485 Slave - %s\n", USE_ISR_MODE ? "ISR Mode" : "Driver Mode");
-    Serial.printf("Chip Model: %s Rev %d\n", ESP.getChipModel(), ESP.getChipRevision());
-    Serial.printf("CPU Freq: %d MHz, Flash: %d MB\n", ESP.getCpuFreqMHz(), ESP.getFlashChipSize() / 1024 / 1024);
-    Serial.printf("Max valid GPIO: %d\n", SOC_GPIO_PIN_COUNT - 1);
-    Serial.printf("Slave Address: %d\n", SLAVE_ADDRESS);
-    Serial.printf("Baud Rate: %d\n", RS485_BAUD_RATE);
-    Serial.printf("TX Pin: %d, RX Pin: %d, DE Pin: %d\n", RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN);
-    Serial.printf("Switch Pin: %d, MC Ready LED Pin: %d\n", SWITCH_PIN, MC_READY_PIN);
-    Serial.println("===========================================");
+    dbgPrint("");
+    dbgPrint("===========================================");
+    dbgPrintf("ESP32 RS485 Slave - %s\n", USE_ISR_MODE ? "ISR Mode" : "Driver Mode");
+    dbgPrintf("Chip Model: %s Rev %d\n", ESP.getChipModel(), ESP.getChipRevision());
+    dbgPrintf("CPU Freq: %d MHz, Flash: %d MB\n", ESP.getCpuFreqMHz(), ESP.getFlashChipSize() / 1024 / 1024);
+    dbgPrintf("Max valid GPIO: %d\n", SOC_GPIO_PIN_COUNT - 1);
+    dbgPrintf("Slave Address: %d\n", SLAVE_ADDRESS);
+    dbgPrintf("Baud Rate: %d\n", RS485_BAUD_RATE);
+    dbgPrintf("TX Pin: %d, RX Pin: %d, DE Pin: %d\n", RS485_TX_PIN, RS485_RX_PIN, RS485_DE_PIN);
+    dbgPrintf("Switch Pin: %d, MC Ready LED Pin: %d\n", SWITCH_PIN, MC_READY_PIN);
+    dbgPrint("===========================================");
 
     // Validate pin numbers for this chip
     #if SWITCH_PIN >= 0
     if (SWITCH_PIN >= SOC_GPIO_PIN_COUNT) {
-        Serial.printf("*** WARNING: SWITCH_PIN %d is INVALID for this chip (max=%d)! ***\n",
+        dbgPrintf("*** WARNING: SWITCH_PIN %d is INVALID for this chip (max=%d)! ***\n",
                       SWITCH_PIN, SOC_GPIO_PIN_COUNT - 1);
     }
     #endif
     #if MC_READY_PIN >= 0
     if (MC_READY_PIN >= SOC_GPIO_PIN_COUNT) {
-        Serial.printf("*** WARNING: MC_READY_PIN %d is INVALID for this chip (max=%d)! ***\n",
+        dbgPrintf("*** WARNING: MC_READY_PIN %d is INVALID for this chip (max=%d)! ***\n",
                       MC_READY_PIN, SOC_GPIO_PIN_COUNT - 1);
     }
     #endif
     if (RS485_TX_PIN >= SOC_GPIO_PIN_COUNT || RS485_RX_PIN >= SOC_GPIO_PIN_COUNT) {
-        Serial.printf("*** WARNING: UART pins may be INVALID for this chip (max=%d)! ***\n",
+        dbgPrintf("*** WARNING: UART pins may be INVALID for this chip (max=%d)! ***\n",
                       SOC_GPIO_PIN_COUNT - 1);
     }
 
     udpDbgInit();
 
-    Serial.println("Initializing RS485 hardware...");
+    dbgPrint("Initializing RS485 hardware...");
     initRS485Hardware();
-    Serial.println("RS485 hardware initialized!");
-    Serial.println("Entering main loop...");
+    dbgPrint("RS485 hardware initialized!");
+    dbgPrint("Entering main loop...");
 }
 
 static unsigned long lastHeartbeat = 0;
@@ -1434,7 +1451,7 @@ void loop() {
     loopCount++;
     if (millis() - lastHeartbeat >= 5000) {
         lastHeartbeat = millis();
-        Serial.printf("[ALIVE] loops=%lu, state=%d, rxBytes=%lu, exportBuf=%d/%d\n",
+        dbgPrintf("[ALIVE] loops=%lu, state=%d, rxBytes=%lu, exportBuf=%d/%d\n",
                       loopCount, (int)rs485State, rxByteCount,
                       exportReadPos, exportWritePos);
         udpDbgSend("ALIVE state=%d rxBytes=%lu", (int)rs485State, rxByteCount);

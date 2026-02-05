@@ -5,205 +5,287 @@
 #ifdef ARDUINO_ARCH_ESP32
 
 // ============================================================================
-// ESP32-S3 RS485 MASTER - DEFINITIVE IMPLEMENTATION
+// ESP32 RS485 MASTER - Bare-Metal ISR Multi-Bus Implementation
 // ============================================================================
 //
-// This implementation addresses ALL identified root causes:
+// Protocol-perfect RS485 Master for DCS-BIOS using bare-metal UART with
+// ISR-driven RX and inline blocking TX. Matches AVR DcsBiosNgRS485Master
+// behavior exactly, and SURPASSES it in broadcast strategy and poll scanning.
 //
-// 1. MANUAL DE CONTROL - Not using UART_MODE_RS485_HALF_DUPLEX
-//    The auto mode's DE timing is not cycle-perfect like AVR's TX ISR.
-//    We control DE via GPIO with calculated timing.
+// SUPPORTED ESP32 VARIANTS:
+// - ESP32 (Classic)    - Dual-core, UART0 via USB-to-serial chip, 3 UARTs
+// - ESP32-S2           - Single-core, Native USB CDC, 2 UARTs
+// - ESP32-S3           - Dual-core, Native USB CDC, 3 UARTs
+// - ESP32-C3           - Single-core RISC-V, USB Serial/JTAG, 2 UARTs
+// - ESP32-C6           - Single-core RISC-V, USB Serial/JTAG, 2 UARTs
 //
-// 2. THREAD-SAFE IPC - Using FreeRTOS StreamBuffer
-//    The library's RingBuffer is not thread-safe for dual-core.
-//    StreamBuffer is lock-free for single-reader/single-writer.
+// ARCHITECTURE:
+// - ISR-driven RX: Each byte triggers an ISR that processes the state machine
+//   immediately, just like AVR's USART_RX_vect.
+// - Inline blocking TX: No FreeRTOS tasks for TX. TX blocks loop() briefly.
+// - Echo prevention: RX interrupt is disabled during TX and RX FIFO is flushed
+//   after TX completes, mirroring AVR's set_txen()/clear_txen() behavior.
+// - Bare-metal UART: Uses periph_module_enable + uart_ll_* for direct hardware
+//   access, matching the proven slave implementation.
+// - FreeRTOS PC input task: Dedicated task drains Serial into RingBuffer<1024>
+//   even while main loop blocks during TX. Matches AVR's ISR-driven PC RX.
+// - Inline PC forwarding: After each bus->loop(), slave responses are forwarded
+//   to PC immediately - reduces latency by one full loop cycle.
+// - Multi-bus: Up to 3 independent RS485 buses with linked-list iteration.
+// - Chunked broadcasts: Max 64 bytes per burst, polls every 2ms minimum.
+// - Safe poll scan: No infinite loop when zero slaves present.
+// - Timeout zero byte: Sent on behalf of non-responding slaves (AVR-compatible).
 //
-// 3. USB BURST HANDLING - Large buffers + dedicated task
-//    USB Full-Speed delivers data in 1ms bursts (~25 bytes).
-//    Dedicated task on Core 0 drains USB buffer continuously.
+// PROTOCOL (Exact match to AVR DcsBiosNgRS485Master):
 //
-// 4. PACKET-BASED TX - Write entire packet at once
-//    Prevents gaps between bytes that could cause early DE drop.
+//   BROADCAST (Master -> All Slaves):
+//     [0x00] [0x00] [Length] [Data...] [Checksum]
 //
-// 5. CALCULATED TX TIMING - Deterministic DE drop
-//    At 250kbaud, each byte = 40µs. We calculate exact TX time.
+//   POLL (Master -> Specific Slave):
+//     [SlaveAddr] [0x00] [0x00]
+//
+//   SLAVE RESPONSE:
+//     [DataLength] [MsgType] [Data...] [Checksum]  - if slave has data
+//     [0x00]                                        - if slave has nothing
 //
 // ============================================================================
-
-#if !defined(CONFIG_IDF_TARGET_ESP32S3)
-    #error "DCS-BIOS RS485 Master requires ESP32-S3."
-#endif
 
 #include "Arduino.h"
 #include <stdint.h>
 #include <driver/uart.h>
 #include <driver/gpio.h>
+#include <esp_timer.h>
+#include <rom/ets_sys.h>
+#include <soc/soc_caps.h>
+
+// Bare-metal UART access (same pattern as slave ISR mode)
+#include <hal/uart_ll.h>
+#include <hal/gpio_ll.h>
+#include <soc/uart_struct.h>
+#include <soc/gpio_struct.h>
+#include <soc/uart_periph.h>
+#include <esp_intr_alloc.h>
+
+// Peripheral module control - handle both old and new ESP-IDF locations
+#if __has_include(<esp_private/periph_ctrl.h>)
+#include <esp_private/periph_ctrl.h>
+#else
+#include <driver/periph_ctrl.h>
+#endif
+#include <soc/periph_defs.h>
+
+// FreeRTOS for PC Serial input task
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <freertos/stream_buffer.h>
-#include <esp_timer.h>
+
+#include "../RingBuffer.h"
 
 // ============================================================================
-// CONFIGURATION
+// CONFIGURATION DEFAULTS (user can override before #include <DcsBios.h>)
 // ============================================================================
 
-#ifndef RS485_UART_NUM
-#define RS485_UART_NUM 1
+// --- BUS 1 (Primary, enabled by default) ---
+#ifndef RS485_BUS1_TX_PIN
+#define RS485_BUS1_TX_PIN 17
 #endif
 
-#ifndef RS485_RX_PIN
-#define RS485_RX_PIN 18
+#ifndef RS485_BUS1_RX_PIN
+#define RS485_BUS1_RX_PIN 18
 #endif
 
-#ifndef RS485_TX_PIN
-#define RS485_TX_PIN 17
+#ifndef RS485_BUS1_DE_PIN
+#define RS485_BUS1_DE_PIN -1        // -1 = auto-direction mode
 #endif
 
-#ifndef TXENABLE_PIN
-#error "TXENABLE_PIN must be defined"
+#ifndef RS485_BUS1_UART_NUM
+#define RS485_BUS1_UART_NUM 1
 #endif
 
+// --- BUS 2 (Disabled by default) ---
+#ifndef RS485_BUS2_TX_PIN
+#define RS485_BUS2_TX_PIN -1
+#endif
+
+#ifndef RS485_BUS2_RX_PIN
+#define RS485_BUS2_RX_PIN -1
+#endif
+
+#ifndef RS485_BUS2_DE_PIN
+#define RS485_BUS2_DE_PIN -1
+#endif
+
+#ifndef RS485_BUS2_UART_NUM
+#define RS485_BUS2_UART_NUM -1
+#endif
+
+// --- BUS 3 (Disabled by default) ---
+#ifndef RS485_BUS3_TX_PIN
+#define RS485_BUS3_TX_PIN -1
+#endif
+
+#ifndef RS485_BUS3_RX_PIN
+#define RS485_BUS3_RX_PIN -1
+#endif
+
+#ifndef RS485_BUS3_DE_PIN
+#define RS485_BUS3_DE_PIN -1
+#endif
+
+#ifndef RS485_BUS3_UART_NUM
+#define RS485_BUS3_UART_NUM -1
+#endif
+
+// --- Common Configuration ---
+#ifndef RS485_BAUD_RATE
 #define RS485_BAUD_RATE 250000
+#endif
 
-// Timing constants (microseconds)
-#define US_PER_BYTE 40                  // At 250kbaud: 10 bits / 250000 = 40µs
-#define TX_MARGIN_US 20                 // Safety margin after calculated TX time
+// TX Warmup Delays (microseconds)
+#ifndef TX_WARMUP_DELAY_MANUAL_US
+#define TX_WARMUP_DELAY_MANUAL_US 50    // DE pin stabilization time
+#endif
+
+#ifndef TX_WARMUP_DELAY_AUTO_US
+#define TX_WARMUP_DELAY_AUTO_US 50      // Auto-direction transceiver settling
+#endif
+
+// Buffer Sizes
+#ifndef EXPORT_BUFFER_SIZE
+#define EXPORT_BUFFER_SIZE 256          // Buffer for PC -> Slaves data (per bus)
+#endif
+
+#ifndef MESSAGE_BUFFER_SIZE
+#define MESSAGE_BUFFER_SIZE 64          // Buffer for Slave -> PC data (per bus)
+#endif
+
+#ifndef PC_RX_BUFFER_SIZE
+#define PC_RX_BUFFER_SIZE 1024          // Buffer for PC Serial input task
+#endif
+
+// Timing Constants (microseconds) - matches AVR exactly
+#ifndef POLL_TIMEOUT_US
 #define POLL_TIMEOUT_US 1000            // 1ms timeout for slave response
-#define RX_TIMEOUT_US 5000              // 5ms timeout for complete message
+#endif
 
-// Buffer sizes
-#define PC_STREAM_BUFFER_SIZE 1024      // USB CDC to RS485 (handles 1ms bursts)
-#define RS485_UART_RX_BUFFER 512        // UART RX buffer
-#define RS485_UART_TX_BUFFER 512        // UART TX buffer
-#define EXPORT_BUFFER_SIZE 256          // Export data accumulator
-#define MESSAGE_BUFFER_SIZE 64          // Slave response buffer
+#ifndef RX_TIMEOUT_US
+#define RX_TIMEOUT_US 5000              // 5ms timeout for complete message
+#endif
+
+#ifndef MAX_POLL_INTERVAL_US
+#define MAX_POLL_INTERVAL_US 2000       // Ensure polls at least every 2ms
+#endif
+
+// Broadcast chunking - prevents bus hogging during heavy export traffic
+#ifndef MAX_BROADCAST_CHUNK
+#define MAX_BROADCAST_CHUNK 64          // Max bytes per broadcast burst
+#endif
+
+// Slave address range to scan (1-127 valid, 0 is broadcast)
+#ifndef MIN_SLAVE_ADDRESS
+#define MIN_SLAVE_ADDRESS 1
+#endif
+
+#ifndef MAX_SLAVE_ADDRESS
+#define MAX_SLAVE_ADDRESS 127
+#endif
+
+// Internal array size
+#define MAX_SLAVES 128
+
+// ============================================================================
+// COMPILE-TIME BUS DETECTION
+// ============================================================================
+
+#define RS485_BUS1_ENABLED (RS485_BUS1_UART_NUM >= 0 && RS485_BUS1_TX_PIN >= 0 && RS485_BUS1_RX_PIN >= 0)
+#define RS485_BUS2_ENABLED (RS485_BUS2_UART_NUM >= 0 && RS485_BUS2_TX_PIN >= 0 && RS485_BUS2_RX_PIN >= 0)
+#define RS485_BUS3_ENABLED (RS485_BUS3_UART_NUM >= 0 && RS485_BUS3_TX_PIN >= 0 && RS485_BUS3_RX_PIN >= 0)
+
+#define RS485_NUM_BUSES ((RS485_BUS1_ENABLED ? 1 : 0) + (RS485_BUS2_ENABLED ? 1 : 0) + (RS485_BUS3_ENABLED ? 1 : 0))
+
+#if RS485_NUM_BUSES == 0
+    #error "At least one RS485 bus must be enabled (set RS485_BUS1 pins)"
+#endif
+
+// PC Serial - works on ALL ESP32 variants
+#ifndef PC_SERIAL
+#define PC_SERIAL Serial
+#endif
 
 namespace DcsBios {
 
-    // ============================================================================
-    // SIMPLE RING BUFFER - For single-core use only (within RS485 task)
-    // ============================================================================
+    // ========================================================================
+    // STATE MACHINE
+    // ========================================================================
 
-    template<unsigned int SIZE>
-    class SimpleRingBuffer {
-    private:
-        volatile uint8_t buffer[SIZE];
-        volatile uint8_t head;
-        volatile uint8_t tail;
-    public:
-        volatile bool complete;
-
-        SimpleRingBuffer() : head(0), tail(0), complete(false) {}
-
-        inline void put(uint8_t c) {
-            buffer[head] = c;
-            head = (head + 1) % SIZE;
-        }
-
-        inline uint8_t get() {
-            uint8_t c = buffer[tail];
-            tail = (tail + 1) % SIZE;
-            return c;
-        }
-
-        inline bool isEmpty() const { return head == tail; }
-        inline bool isNotEmpty() const { return head != tail; }
-        inline uint8_t getLength() const { return (head - tail) % SIZE; }
-        inline void clear() { head = tail = 0; complete = false; }
+    enum MasterState {
+        MASTER_STATE_IDLE,
+        MASTER_STATE_RX_WAIT_DATALENGTH,
+        MASTER_STATE_RX_WAIT_MSGTYPE,
+        MASTER_STATE_RX_WAIT_DATA,
+        MASTER_STATE_RX_WAIT_CHECKSUM
     };
 
-    // ============================================================================
-    // RS485 MASTER CLASS
-    // ============================================================================
+    // ========================================================================
+    // RS485 MASTER CLASS - One instance per bus
+    // ========================================================================
+
+    // Forward declaration for ISR
+    class RS485Master;
+    static void IRAM_ATTR masterUartIsrHandler(void* arg);
 
     class RS485Master {
-    public:
-        // Export data buffer (fed from StreamBuffer, drained to RS485)
-        SimpleRingBuffer<EXPORT_BUFFER_SIZE> exportData;
+    private:
+        // Hardware configuration
+        int uartNum;
+        int txPin, rxPin, dePin;
 
-        // Message buffer for slave responses
-        SimpleRingBuffer<MESSAGE_BUFFER_SIZE> messageBuffer;
+        // Bare-metal UART hardware pointer
+        uart_dev_t* uartHw;
+        intr_handle_t uartIntrHandle;
+
+        // State machine (volatile - modified by ISR)
+        volatile MasterState state;
+        volatile int64_t rxStartTime;
+        volatile uint8_t rxtxLen;
+        volatile uint8_t rxMsgType;
+        volatile int64_t lastPollTime;
 
         // Slave tracking
-        volatile bool slave_present[128];
+        volatile bool slavePresent[MAX_SLAVES];
+        uint8_t pollAddressCounter;
+        uint8_t scanAddressCounter;
+        uint8_t currentPollAddress;
 
-        // State machine
-        volatile uint8_t state;
-        enum State {
-            IDLE,
-            // TX states (Master → Slaves)
-            TX_SENDING,
-            TX_WAIT_COMPLETE,
-            // Poll states
-            POLL_SENDING,
-            POLL_WAIT_COMPLETE,
-            // RX states (Slaves → Master)
-            RX_WAIT_DATALENGTH,
-            RX_WAIT_MSGTYPE,
-            RX_WAIT_DATA,
-            RX_WAIT_CHECKSUM
-        };
+        // DE pin control
+        inline void setDE(bool high);
 
-    private:
-        uart_port_t uartNum;
-        gpio_num_t dePin;
+        // TX helpers - inline blocking
+        inline void prepareForTransmit();
+        inline void finishTransmit();
+        inline void txWriteBlocking(const uint8_t* data, uint16_t len);
 
-        // Polling
-        volatile uint8_t poll_address;
-        volatile uint8_t poll_address_counter;
-        volatile uint8_t scan_address_counter;
+    public:
+        // Buffers (public for PC aggregation and ISR access)
+        RingBuffer<EXPORT_BUFFER_SIZE> exportData;
+        RingBuffer<MESSAGE_BUFFER_SIZE> messageBuffer;
 
-        // TX/RX state
-        volatile uint8_t rxtx_len;
-        volatile uint8_t rx_msgtype;
-        volatile uint8_t checksum;
-        volatile int64_t tx_complete_time;   // Calculated time when TX is complete
-        volatile int64_t rx_start_time;
+        // Linked list for iteration
+        RS485Master* next;
+        static RS485Master* first;
 
+        RS485Master(int uartNum, int txPin, int rxPin, int dePin);
+        void init();
         void advancePollAddress();
-        void setDE(bool high);
-        void sendPacket(const uint8_t* data, size_t len);
-        int64_t calculateTxCompleteTime(size_t bytes);
-
-    public:
-        RS485Master();
-        void begin();
+        void sendPollFrame(uint8_t addr);
+        void sendBroadcastFrame();
+        void sendTimeoutZeroByte();
+        void IRAM_ATTR rxISR();
         void loop();
-
-        // Feed export data from StreamBuffer
-        void feedExportByte(uint8_t c);
     };
 
-    // ============================================================================
-    // PC CONNECTION CLASS
-    // ============================================================================
-
-    class MasterPCConnection {
-    private:
-        StreamBufferHandle_t pcToRS485Stream;
-        TaskHandle_t rxTaskHandle;
-        volatile uint32_t tx_start_time;
-
-        static void rxTaskFunc(void* param);
-
-    public:
-        MasterPCConnection();
-        void begin();
-
-        // Drain StreamBuffer into RS485 export buffer
-        void processStreamBuffer();
-
-        // Send slave responses to PC
-        void txProcess();
-
-        void checkTimeout();
-
-        // Get stream buffer handle for task
-        StreamBufferHandle_t getStreamBuffer() { return pcToRS485Stream; }
-    };
-
-    extern RS485Master rs485master;
-    extern MasterPCConnection pcConnection;
+    // ========================================================================
+    // DCSBIOS INTERFACE
+    // ========================================================================
 
     void setup();
     void loop();
