@@ -12,7 +12,7 @@
 namespace DcsBios {
 	
 	ProtocolParser parser;
-	DcsBios::RingBuffer<32> messageBuffer;
+	DcsBios::RingBuffer<64> messageBuffer;
 	
 
 	bool tryToSendDcsBiosMessage(const char* msg, const char* arg) {
