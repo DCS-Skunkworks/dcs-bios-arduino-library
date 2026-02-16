@@ -1,3 +1,7 @@
+## v0.3.12
+- Increase RS485 slave's message buffer size from 32 to 64 bytes by @ashchan (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/101)
+- Update Addresses.h by @charliefoxtwo (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/102)
+
 ## v0.3.11
 - MatSwitch2Pos & MatSwitch3Pos added by msmarino (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/59)
 - Esp32 wifi by maciekish (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/83)
