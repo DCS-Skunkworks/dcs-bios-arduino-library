@@ -12,7 +12,11 @@
 namespace DcsBios {
 	
 	ProtocolParser parser;
+#ifdef DCSBIOS_RS485_SLAVE_LARGE_BUFFER
+	DcsBios::RingBuffer<64> messageBuffer;
+#else
 	DcsBios::RingBuffer<32> messageBuffer;
+#endif
 	
 
 	bool tryToSendDcsBiosMessage(const char* msg, const char* arg) {

@@ -11,6 +11,13 @@
 */
 #define TXENABLE_PIN 2
 
+/*
+  The following #define tells DCS-BIOS that this RS-485 slave device uses a
+  larger ring buffer size than the default. Required to allow message IDs
+  that are longer than 32 bytes from aircraft such as F/A-18C and F-4E.
+*/
+#define DCSBIOS_RS485_SLAVE_LARGE_BUFFER
+
 #include "DcsBios.h"
 
 /* paste code snippets from the reference documentation here */
