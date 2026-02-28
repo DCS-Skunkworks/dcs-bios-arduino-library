@@ -57,6 +57,10 @@ do not come with their own build system, we are just putting everything into the
 	#include "internal/ESP32WiFi/DcsBiosESP32WiFiSlave.h"
 	#include "internal/ESP32WiFi/DcsBiosESP32WiFiSlave.cpp.inc"
 #endif
+#ifdef DCSBIOS_ESP32_BLUETOOTH
+	#include "internal/ESP32Bluetooth/DcsBiosESP32BluetoothSlave.h"
+	#include "internal/ESP32Bluetooth/DcsBiosESP32BluetoothSlave.cpp.inc"
+#endif
 #ifdef DCSBIOS_IRQ_SERIAL
 
 	namespace DcsBios {
