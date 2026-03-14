@@ -1,0 +1,8 @@
+origin: DCS-Skunkworks/dcs-bios-arduino-library
+
+statements:
+  - subjects:
+      - repo:DCS-Skunkworks/dcs-bios:*
+    permissions:
+      contents: write
+      pull-requests: write
