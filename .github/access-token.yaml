@@ -2,7 +2,7 @@ origin: TylerDOC1776/dcs-bios-arduino-library
 
 statements:
   - subjects:
-      - repo:TylerDOC1776/dcs-bios:*
+      - repo:TylerDOC1776/dcs-bios:**
     permissions:
       contents: write
       pull_requests: write
