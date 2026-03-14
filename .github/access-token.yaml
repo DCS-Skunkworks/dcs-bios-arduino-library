@@ -5,4 +5,4 @@ statements:
       - repo:TylerDOC1776/dcs-bios:**
     permissions:
       contents: write
-      pull_requests: write
+      pull-requests: write
