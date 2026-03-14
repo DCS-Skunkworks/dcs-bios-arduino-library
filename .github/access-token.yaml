@@ -1,8 +1,8 @@
-origin: DCS-Skunkworks/dcs-bios-arduino-library
+origin: TylerDOC1776/dcs-bios-arduino-library
 
 statements:
   - subjects:
-      - repo:DCS-Skunkworks/dcs-bios:*
+      - repo:TylerDOC1776/dcs-bios:*
     permissions:
       contents: write
       pull-requests: write
