@@ -15,11 +15,14 @@ namespace DcsBios {
 				lastState_ = (lastState_==0)?-1:0;
 			}
 			void pollInput() {
-				unsigned int state; 
+				unsigned int state;
+				unsigned int value = (unsigned int)analogRead(pin_);
+				if (value < input_min_) value = input_min_;
+				else if (value > input_max_) value = input_max_;
 				if (reverse_)
-					state = map(analogRead(pin_), input_min_, input_max_, 65535, 0);
+					state = map(value, input_min_, input_max_, 65535, 0);
 				else
-					state = map(analogRead(pin_), input_min_, input_max_, 0, 65535);
+					state = map(value, input_min_, input_max_, 0, 65535);
 
 				accumulator += ((float)state - accumulator) / (float)ewma_divisor;
 				state = (unsigned int)accumulator;
@@ -54,10 +57,13 @@ namespace DcsBios {
 				input_max_ = input_max;
 
 				pinMode(pin_, INPUT);
+				unsigned int value = (unsigned int)analogRead(pin_);
+				if (value < input_min_) value = input_min_;
+				else if (value > input_max_) value = input_max_;
 				if (reverse_)
-					lastState_ = map(analogRead(pin_), input_min_, input_max_, 65535, 0);
+					lastState_ = map(value, input_min_, input_max_, 65535, 0);
 				else
-					lastState_ = map(analogRead(pin_), input_min_, input_max_, 0, 65535);
+					lastState_ = map(value, input_min_, input_max_, 0, 65535);
 			}
 
 			void SetControl( const char* msg )
