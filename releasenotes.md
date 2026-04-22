@@ -1,3 +1,6 @@
+## Unreleased
+- Add RS485 slave support for Renesas-based boards such as Arduino Uno R4 (Minima/WiFi). On these boards, RS485 uses `Serial1` at 250000 baud.
+
 ## v0.3.12
 - Increase RS485 slave's message buffer size from 32 to 64 bytes by @ashchan (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/101)
 - Update Addresses.h by @charliefoxtwo (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/102)

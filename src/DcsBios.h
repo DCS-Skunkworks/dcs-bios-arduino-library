@@ -45,7 +45,10 @@ do not come with their own build system, we are just putting everything into the
 	#include "internal/DcsBiosNgRS485Master.cpp.inc"
 #endif
 #ifdef DCSBIOS_RS485_SLAVE
-	#if defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1280__)
+	#if defined(ARDUINO_ARCH_RENESAS)
+		#include "internal/Renesas/DcsBiosNgRS485Slave.h"
+		#include "internal/Renesas/DcsBiosNgRS485Slave.cpp.inc"
+	#elif defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1280__)
 		#include "internal/UART.Mod/DcsBiosNgRS485Slave.h"
 		#include "internal/UART.Mod/DcsBiosNgRS485Slave.cpp.inc"
 	#else
