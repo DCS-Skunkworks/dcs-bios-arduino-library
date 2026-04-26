@@ -1,13 +1,5 @@
 #ifdef DCSBIOS_RS485_SLAVE
 
-#ifndef DCSBIOS_RS485_RX_ACTIVITY
-#define DCSBIOS_RS485_RX_ACTIVITY()
-#endif
-
-#ifndef DCSBIOS_RS485_TX_ACTIVITY
-#define DCSBIOS_RS485_TX_ACTIVITY()
-#endif
-
 namespace DcsBios {
 
 	enum State {
@@ -38,7 +30,6 @@ namespace DcsBios {
 	static RxDataType rx_datatype = RXDATA_IGNORE;
 
 	static void transmitResponse() {
-		DCSBIOS_RS485_TX_ACTIVITY();
 		digitalWrite(TXENABLE_PIN, HIGH);
 		delayMicroseconds(10);
 
@@ -82,7 +73,6 @@ namespace DcsBios {
 	}
 
 	static void processRxByte(uint8_t c) {
-		DCSBIOS_RS485_RX_ACTIVITY();
 		switch (state) {
 			case UNINITIALIZED:
 				last_rx_time = micros();
