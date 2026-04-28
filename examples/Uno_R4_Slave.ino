@@ -1,4 +1,3 @@
-
 #define DCSBIOS_RS485_SLAVE 1
 #define DCSBIOS_RS485_R4
 #define TXENABLE_PIN 2
