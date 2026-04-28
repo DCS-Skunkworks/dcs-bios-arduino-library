@@ -13,11 +13,6 @@
 #define UART1_SELECT
 
 /*
-  This example is for AVR UART register selection (e.g. Mega/32u4).
-  For Uno R4, use RS485Slave.ino instead.
-*/
-
-/*
   The following #define tells DCS-BIOS that this RS-485 slave device uses a
   larger ring buffer size than the default. Required to allow message IDs
   that are longer than 32 bytes from aircraft such as F/A-18C and F-4E.
