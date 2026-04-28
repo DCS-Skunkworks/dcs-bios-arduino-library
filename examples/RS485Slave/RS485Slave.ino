@@ -12,11 +12,6 @@
 #define TXENABLE_PIN 2
 
 /*
-  Arduino Uno R4 note:
-  RS485 slave mode uses Serial1 (pins D0=RX, D1=TX) at 250000 baud.
-*/
-
-/*
   The following #define tells DCS-BIOS that this RS-485 slave device uses a
   larger ring buffer size than the default. Required to allow message IDs
   that are longer than 32 bytes from aircraft such as F/A-18C and F-4E.
