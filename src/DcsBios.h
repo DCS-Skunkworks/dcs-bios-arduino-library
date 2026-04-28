@@ -46,8 +46,11 @@ do not come with their own build system, we are just putting everything into the
 #endif
 #ifdef DCSBIOS_RS485_SLAVE
 	#if defined(DCSBIOS_RS485_R4)
-		#include "internal/Renesas/DcsBiosNgRS485Slave.h"
-		#include "internal/Renesas/DcsBiosNgRS485Slave.cpp.inc"
+		// RS485 slave implementation for Renesas-based Uno R4 boards.
+		// Also compatible with Nano R4 boards which use the same Renesas core and
+		// Serial1-based wiring. The implementation lives under `internal/Uno_R4`.
+		#include "internal/Uno_R4/DcsBiosNgRS485Slave.h"
+		#include "internal/Uno_R4/DcsBiosNgRS485Slave.cpp.inc"
 	#elif defined(__AVR_ATmega32U4__) || defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1280__)
 		#include "internal/UART.Mod/DcsBiosNgRS485Slave.h"
 		#include "internal/UART.Mod/DcsBiosNgRS485Slave.cpp.inc"
