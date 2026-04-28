@@ -3,27 +3,15 @@
 #define TXENABLE_PIN 2
 #define DCSBIOS_RS485_SLAVE_LARGE_BUFFER
 
-// DCS console brightness output uses PWM pin 11.
-const uint8_t CONSOLE_BRIGHTNESS_PWM_PIN = 11;
-
 #include "DcsBios.h"
 
-void onPltIntLightConsoleChange(unsigned int newValue) {
-	analogWrite(CONSOLE_BRIGHTNESS_PWM_PIN, (uint8_t)(newValue >> 8));
-}
+// Console lighting removed — using onboard LED for Master Caution only
 
-DcsBios::IntegerBuffer pltIntLightConsoleBuffer(0x2d8a, 0xffff, 0, onPltIntLightConsoleChange);
+// Use the onboard LED for Master Caution so it's accessible to other users
+// Address and mask taken from DCS datarefs for master caution
+DcsBios::LED masterCaution(0x1012, 0x0800, LED_BUILTIN);
 
 void setup() {
-	pinMode(CONSOLE_BRIGHTNESS_PWM_PIN, OUTPUT);
-	analogWrite(CONSOLE_BRIGHTNESS_PWM_PIN, 0);
-
-	for (uint8_t i = 0; i < 3; i++) {
-		analogWrite(CONSOLE_BRIGHTNESS_PWM_PIN, 255);
-		delay(500);
-		analogWrite(CONSOLE_BRIGHTNESS_PWM_PIN, 0);
-		delay(500);
-	}
 	DcsBios::setup();
 }
 
