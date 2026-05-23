@@ -1,3 +1,9 @@
+## v0.3.13
+- Add GitHub App access token policy for automated Addresses.h updates by @TylerDOC1776 (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/105)
+- Clamp potentiometer values to min/max range by @michaelosthege (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/107)
+- Update Addresses.h for v0.11.3 by @access-tokens-for-github-actions[bot] (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/106)
+- Update Addresses.h for v0.11.4 by @access-tokens-for-github-actions[bot] (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/109)
+
 ## v0.3.12
 - Increase RS485 slave's message buffer size from 32 to 64 bytes by @ashchan (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/101)
 - Update Addresses.h by @charliefoxtwo (https://github.com/DCS-Skunkworks/dcs-bios-arduino-library/pull/102)
