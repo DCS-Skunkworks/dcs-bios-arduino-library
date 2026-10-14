@@ -45,14 +45,16 @@ namespace DcsBios {
 			lastState_ = state;
 			
 			if (delta_ >= stepsPerDetent) {
-				switchValue_ = min((signed char)(switchValue_+1), maxSwichValue_);
+				// Plain comparisons instead of min()/max(): those are Arduino macros that other
+				// libraries (e.g. FastLED) #undef, which broke this template when included after them.
+				switchValue_ = (switchValue_ < maxSwichValue_) ? switchValue_ + 1 : maxSwichValue_;
 				char buf[7];
 				utoa(switchValue_, buf, 10);
 				if (tryToSendDcsBiosMessage(msg_, buf))
 					delta_ -= stepsPerDetent;
 			}
 			if (delta_ <= -stepsPerDetent) {
-				switchValue_ = max(switchValue_-1, 0);
+				switchValue_ = (switchValue_ > 0) ? switchValue_ - 1 : 0;
 				char buf[7];
 				utoa(switchValue_, buf, 10);
 				if (tryToSendDcsBiosMessage(msg_, buf))
