@@ -19,6 +19,9 @@ DcsBios::ProtocolParser parser;
 
 unsigned long lastTickMillis;
 
+// Declared before timerTick(), which resets its state.
+DcsBios::Switch3Pos ahcpGunpac("AHCP_GUNPAC", 0, 1);
+
 void setup() {  
   DcsBios::setup();
   lastTickMillis = millis();
@@ -46,7 +49,6 @@ void loop() {
   }
 }
 
-DcsBios::Switch3Pos ahcpGunpac("AHCP_GUNPAC", 0, 1);
 
 // This is the recommended approach and the ideal if we can work out all the kinks:
 // If the mission time changes backwards, we have entered a new aircraft; Resync everything
@@ -69,7 +71,7 @@ void onModTimeChange(char* newValue) {
     uLastModelTimeS = currentModelTimeS;
   }
 }
-DcsBios::StringBuffer<5> modTimeBuffer(0x043e, onModTimeChange);
+DcsBios::StringBuffer<6> modTimeBuffer(CommonData_MOD_TIME_A, onModTimeChange);
 
 // Yet another option, some controls can be synced to DCS by combining a switch control with a Syncing version of that control.
 DcsBios::SyncingSwitch3Pos ahcpMasterArm("AHCP_MASTER_ARM", 2, 3, 0x10e8, 0x000c, 2);
